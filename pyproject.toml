@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coi-auditor"
+version = "0.1.0"
+description = "Certificate of Insurance auditing tool for subcontractors."
+authors = [
+    { name = "Preston Sparks", email = "mprestonsparks@protonmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "openpyxl==3.1.2",
+    "pdfplumber==0.11.6",
+    "python-dotenv==1.0.1",
+    "pytesseract>=0.3.10"
+]
+
+[project.scripts]
+coi-auditor = "coi_auditor.main:run_audit"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,30 @@
+{
+  "file_name": "S&G Siding and Gutters_2023-10-18.pdf",
+  "insured_name": "S&G Siding and Gutters",
+  "alternate_insured_names": ["SG Siding Gutters"],
+  "insurance_policies": [
+    {
+      "policy_type": "General Liability",
+      "effective_date": "2022-10-18",
+      "expiration_date": "2023-10-18",
+      "limit_amount": "2,000,000",
+      "carrier_name": "InsureCo"
+    },
+    {
+      "policy_type": "Automobile Liability",
+      "effective_date": "2022-10-18",
+      "expiration_date": "2023-10-18"
+    },
+    {
+      "policy_type": "Workers Compensation",
+      "effective_date": "2022-10-18",
+      "expiration_date": "2023-10-18"
+    }
+  ],
+  "document_metadata": {
+    "certificate_date": "2022-10-01",
+    "producer_name": "Broker Services Ltd.",
+    "holder_name": "Main Contractor LLC"
+  },
+  "notes": "Placeholder annotation for S&G Siding and Gutters_2023-10-18.pdf. Dates are past."
+}

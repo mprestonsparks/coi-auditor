@@ -1,0 +1,109 @@
+# Configuration for COI Auditor
+
+# Keywords for policy section headings
+policy_section_keywords:
+  general_liability:
+    - "GENERAL LIABILITY"
+    - "COMMERCIAL GENERAL LIABILITY"
+  workers_compensation:
+    - "WORKERS COMPENSATION"
+    - "WORKERS' COMPENSATION AND EMPLOYERS' LIABILITY"
+  automobile_liability:
+    - "AUTOMOBILE LIABILITY"
+    - "AUTO LIABILITY"
+  umbrella_liability:
+    - "UMBRELLA LIABILITY"
+    - "EXCESS LIABILITY"
+
+# Keywords for date column headers
+date_column_header_keywords:
+  effective_date:
+    - "POLICY EFF"
+    - "EFF DATE"
+    - "EFFECTIVE DATE"
+    - "POL EFF DATE"
+  expiration_date:
+    - "POLICY EXP"
+    - "EXP DATE"
+    - "EXPIRATION DATE"
+    - "POL EXP DATE"
+
+# Weights for the date ranking heuristic (sum to 1.0 for simplicity, or adjust logic)
+ranking_heuristic_weights:
+  vertical_alignment: 0.4
+  header_proximity: 0.3
+  # Parsed-date plausibility is a filter, not directly weighted in this sum,
+  # but could be if implemented as a continuous score.
+  # Rarity penalty is also more of a filter or a negative adjustment.
+
+# Plausibility date range
+date_plausibility:
+  years_offset_from_today: 5
+
+# Confidence threshold for date extraction
+confidence_threshold: 0.80
+
+# Pivot year for YY to YYYY conversion (e.g., 2000 means 70 -> 1970, 69 -> 2069 if current year is 2023)
+# A common approach is to assume years < (current_year_short + 20) % 100 are in the current century.
+# For example, if current year is 2023 (short 23), pivot might be (23+20)%100 = 43.
+# So, 00-42 -> 20xx, 43-99 -> 19xx.
+# dateutil.parser.parse default is to use current year context.
+# Let's set a fixed pivot year for now, e.g., 2000.
+# If YY is >= (pivot_year % 100), then 19YY, else 20YY.
+# Example: pivot_year = 2000. YY = 70. 70 >= 0. -> 1970.
+# Example: pivot_year = 2000. YY = 10. 10 < 0 is false. 10 >= 0. -> 1910. This needs refinement.
+# A better approach: if YY + 2000 > current_year + years_offset_from_today, then 19YY, else 20YY.
+# Or, a simpler pivot: if YY > (current_year % 100) + 10 (configurable window), then 19YY, else 20YY.
+# For now, let's use a simple pivot year. If the two-digit year is less than (pivot_year_short), it's 20xx, otherwise 19xx.
+# E.g., pivot_year_short = 70. '69' -> 2069, '70' -> 1970.
+# This is often handled by dateutil.parser with a default_year or by custom logic.
+# We'll use a specific pivot year for the custom logic.
+yy_to_yyyy_pivot_year: 2050 # Years will be 19xx if xx >= 50, else 20xx (assuming current century focus)
+
+# Broad, format-agnostic date regex (for initial candidate gathering)
+# This regex is intentionally loose.
+# It looks for patterns like MM/DD/YY(YY), DD-Mon-YY(YY), YYYY/MM/DD, etc.
+# It doesn't validate day/month ranges strictly, as dateutil will handle that.
+broad_date_regex: '(?i)(?:(?:(?:0?[1-9]|1[0-2])(?:[/.-])(?:0?[1-9]|[12]\d|3[01])(?:[/.-])(?:\d{2}|\d{4}))|(?:(?:0?[1-9]|[12]\d|3[01])(?:[/.-])(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(?:[/.-])(?:\d{2}|\d{4}))|(?:\d{4}(?:[/.-])(?:0?[1-9]|1[0-2])(?:[/.-])(?:0?[1-9]|[12]\d|3[01]))|(?:\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2},?\s+\d{2,4}\b))'
+
+# Keywords for COI specific items
+coi_specific_keywords:
+  coi_date_label:
+    - "DATE"
+    - "DATE (MM/DD/YYYY)"
+  insured_section_header:
+    - "INSURED"
+  policy_number_column:
+    - "POLICY NUMBER"
+    - "POL NO."
+    - "POLICY #"
+
+# Fuzzy Matching Settings
+fuzzy_matching:
+  header_similarity_threshold: 0.88 # Default similarity score (0.0 to 1.0) for header matching
+  # Lower values are more lenient, higher values are stricter.
+  # 0.85-0.90 is often a good starting range.
+# OCR Pre-processing Settings
+ocr_preprocessing:
+  enable_deskew: true
+  enable_adaptive_binarization: true
+  # Parameters for adaptive thresholding (if enabled)
+  adaptive_thresh_block_size: 11 # Must be odd
+  adaptive_thresh_C: 2 # Constant subtracted from the mean or weighted mean
+
+# Layout Analysis Settings
+layout_analysis:
+  # Heuristic Column Detection Parameters
+  column_detection:
+    projection_smoothing_window: 3 # Window size for smoothing projection profiles
+    valley_prominence_factor: 1.5 # Factor to adjust valley prominence threshold
+    min_column_width_ratio: 0.05 # Minimum column width as a ratio of page width
+
+  # ML Model Confidence Thresholds (if used)
+  ml_model_confidence:
+    table_confidence_threshold: 0.7 # Confidence threshold for table detection
+
+  # Layout Reconciliation Parameters
+  layout_reconciliation:
+    min_iou_for_merging: 0.8 # Minimum IoU (Intersection over Union) for merging regions
+    small_region_area_ratio: 0.01 # Maximum area ratio (relative to page area) for filtering small regions

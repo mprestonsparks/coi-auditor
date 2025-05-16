@@ -1,0 +1,113 @@
+{
+  "report_generated_at": "2025-05-14T12:54:10.771729",
+  "corpus_summary": {
+    "total_documents": 1,
+    "total_insured_name_matches": 0,
+    "corpus_dates_tp": 0,
+    "corpus_dates_fp": 6,
+    "corpus_dates_fn": 0,
+    "average_processing_time": 0.0,
+    "policy_type_breakdown": {
+      "General Liability": {
+        "tp": 0,
+        "fp": 2,
+        "fn": 0,
+        "count": 1,
+        "precision": 0.0,
+        "recall": 0,
+        "f1_score": 0
+      },
+      "Automobile Liability": {
+        "tp": 0,
+        "fp": 2,
+        "fn": 0,
+        "count": 1,
+        "precision": 0.0,
+        "recall": 0,
+        "f1_score": 0
+      },
+      "Workers Compensation": {
+        "tp": 0,
+        "fp": 2,
+        "fn": 0,
+        "count": 1,
+        "precision": 0.0,
+        "recall": 0,
+        "f1_score": 0
+      }
+    },
+    "overall_precision_dates": 0.0,
+    "overall_recall_dates": 0,
+    "overall_f1_score_dates": 0
+  },
+  "detailed_results_per_file": [
+    {
+      "pdf_file": "S&G Siding and Gutters_2023-10-18.pdf",
+      "processing_time_seconds": 0.0,
+      "metrics": {
+        "insured_name_match": false,
+        "insured_name_extracted": "Placeholder Insured",
+        "insured_name_ground_truth": "S&G Siding and Gutters",
+        "policy_comparison": {
+          "General Liability": {
+            "effective_date_correct": false,
+            "expiration_date_correct": false,
+            "effective_date_extracted": "2024-01-01",
+            "effective_date_ground_truth": "2022-10-18",
+            "expiration_date_extracted": "2025-01-01",
+            "expiration_date_ground_truth": "2023-10-18",
+            "details": {
+              "eff_found_correct": 0,
+              "eff_found_incorrect": 1,
+              "eff_missed": 0,
+              "exp_found_correct": 0,
+              "exp_found_incorrect": 1,
+              "exp_missed": 0
+            }
+          },
+          "Automobile Liability": {
+            "effective_date_correct": false,
+            "expiration_date_correct": false,
+            "effective_date_extracted": "2024-02-01",
+            "effective_date_ground_truth": "2022-10-18",
+            "expiration_date_extracted": "2025-02-01",
+            "expiration_date_ground_truth": "2023-10-18",
+            "details": {
+              "eff_found_correct": 0,
+              "eff_found_incorrect": 1,
+              "eff_missed": 0,
+              "exp_found_correct": 0,
+              "exp_found_incorrect": 1,
+              "exp_missed": 0
+            }
+          },
+          "Workers Compensation": {
+            "effective_date_correct": false,
+            "expiration_date_correct": false,
+            "effective_date_extracted": "2024-03-01",
+            "effective_date_ground_truth": "2022-10-18",
+            "expiration_date_extracted": "2025-03-01",
+            "expiration_date_ground_truth": "2023-10-18",
+            "details": {
+              "eff_found_correct": 0,
+              "eff_found_incorrect": 1,
+              "eff_missed": 0,
+              "exp_found_correct": 0,
+              "exp_found_incorrect": 1,
+              "exp_missed": 0
+            }
+          }
+        },
+        "summary_stats": {
+          "total_gt_policy_dates": 6,
+          "dates_tp": 0,
+          "dates_fp": 6,
+          "dates_fn": 0,
+          "precision_dates": 0.0,
+          "recall_dates": 0,
+          "f1_score_dates": 0
+        }
+      }
+    }
+  ]
+}

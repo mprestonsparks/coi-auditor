@@ -1,0 +1,4 @@
+pdf_file,processing_time_seconds,insured_name_match,insured_name_ground_truth,insured_name_extracted,file_date_precision,file_date_recall,file_date_f1,file_dates_tp,file_dates_fp,file_dates_fn,policy_type,eff_date_correct,eff_date_gt,eff_date_ext,exp_date_correct,exp_date_gt,exp_date_ext
+S&G Siding and Gutters_2023-10-18.pdf,0.00,False,S&G Siding and Gutters,Placeholder Insured,0.000,0.000,0.000,0,6,0,General Liability,False,2022-10-18,2024-01-01,False,2023-10-18,2025-01-01
+S&G Siding and Gutters_2023-10-18.pdf,0.00,False,S&G Siding and Gutters,Placeholder Insured,0.000,0.000,0.000,0,6,0,Automobile Liability,False,2022-10-18,2024-02-01,False,2023-10-18,2025-02-01
+S&G Siding and Gutters_2023-10-18.pdf,0.00,False,S&G Siding and Gutters,Placeholder Insured,0.000,0.000,0.000,0,6,0,Workers Compensation,False,2022-10-18,2024-03-01,False,2023-10-18,2025-03-01
