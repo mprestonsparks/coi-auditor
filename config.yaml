@@ -78,6 +78,9 @@ coi_specific_keywords:
     - "POL NO."
     - "POLICY #"
 
+# Minimum similarity score for matching PDF filenames to subcontractor names
+min_similarity_score: 0.60
+
 # Fuzzy Matching Settings
 fuzzy_matching:
   header_similarity_threshold: 0.88 # Default similarity score (0.0 to 1.0) for header matching
@@ -107,3 +110,13 @@ layout_analysis:
   layout_reconciliation:
     min_iou_for_merging: 0.8 # Minimum IoU (Intersection over Union) for merging regions
     small_region_area_ratio: 0.01 # Maximum area ratio (relative to page area) for filtering small regions
+
+# Folder Structure Configuration
+folder_structure:
+  # Name of the terminal folder containing COI files
+  coi_folder_name: "Subcontractor COIs"
+  # Alternative folder names to search for (fallback options)
+  alternative_folder_names:
+    - "COI Files"
+    - "Certificates"
+    - "Insurance Documents"

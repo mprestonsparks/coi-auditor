@@ -1,33 +1,60 @@
 import os
 import json # Added for JSON output
 from pdf2image import convert_from_path
-from PIL import Image, ImageDraw
-from transformers import AutoImageProcessor, TableTransformerForObjectDetection
+from PIL import Image as PILImage, ImageDraw # Alias Image to PILImage to avoid conflict if Image class is defined locally
+from transformers.models.auto.image_processing_auto import AutoImageProcessor
+from transformers.models.table_transformer.modeling_table_transformer import TableTransformerForObjectDetection
 import torch
+from typing import Optional, List, Dict, Any # Added missing imports
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configuration
-PDF_DIR = "test_harness/test_corpus/pdfs"
+# PDF_DIR should point to the relocated test corpus
+PDF_DIR = "tests/harness/corpus/pdfs"
 # Using one of the PDFs from the corpus
-# Ensure FernandoHernandez_2024-09-19.pdf is in test_harness/test_corpus/pdfs/
+# Ensure FernandoHernandez_2024-09-19.pdf is in tests/harness/corpus/pdfs/
 PDF_NAME = "FernandoHernandez_2024-09-19.pdf" # This specific PDF_NAME is not used when iterating all files
 # PDF_NAME = "S&G Siding and Gutters_2023-10-18.pdf" # Alternative test PDF
-OUTPUT_DIR = "test_harness/prototype_output"
+OUTPUT_DIR = "output/ml_prototype_output" # New output directory
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(os.path.join(OUTPUT_DIR), exist_ok=True) # Ensure prototype_output exists
+# The line below is redundant as OUTPUT_DIR itself is the target.
+# os.makedirs(os.path.join(OUTPUT_DIR), exist_ok=True)
 
 # --- Tesseract Configuration (Important for some LayoutLM versions or if explicitly used) ---
-# On Windows, you might need to specify the path to tesseract.exe
-# Example:
-# import pytesseract
-# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Tesseract path can be configured via environment variable TESSERACT_CMD if needed
 # For LayoutLMv3, direct OCR data input is less critical as it processes images.
 # However, having Tesseract installed can be beneficial for some processor functionalities.
 # We will proceed assuming LayoutLMv3's image processing capabilities are primary for this prototype.
+try:
+    import pytesseract
+    tesseract_cmd = os.getenv('TESSERACT_CMD')
+    if tesseract_cmd:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+except ImportError:
+    # pytesseract not installed, which is fine for this prototype
+    pass
 
-def convert_pdf_page_to_image(pdf_path, page_number=0, poppler_path=None):
+def convert_pdf_page_to_image(pdf_path: str, page_number: int = 0, poppler_path: Optional[str] = None) -> Optional[PILImage.Image]:
     """Converts a specific page of a PDF to a PIL Image."""
     try:
-        images = convert_from_path(pdf_path, first_page=page_number + 1, last_page=page_number + 1, poppler_path=poppler_path, dpi=300)
+        if poppler_path:
+            images = convert_from_path(
+                pdf_path,
+                first_page=page_number + 1,
+                last_page=page_number + 1,
+                dpi=300,
+                poppler_path=poppler_path
+            )
+        else:
+            images = convert_from_path(
+                pdf_path,
+                first_page=page_number + 1,
+                last_page=page_number + 1,
+                dpi=300
+            )
         if images:
             return images[0]
         else:
@@ -40,7 +67,7 @@ def convert_pdf_page_to_image(pdf_path, page_number=0, poppler_path=None):
         print("Then add the 'bin' directory to your system PATH.")
         return None
 
-def detect_layout_objects(image: Image, model, processor, device):
+def detect_layout_objects(image: Optional[PILImage.Image], model, processor, device) -> List[Dict[str, Any]]:
     """
     Detects objects in an image using a pre-trained Table-Transformer model,
     processes the results, and returns a sorted list of detected objects.
@@ -49,11 +76,12 @@ def detect_layout_objects(image: Image, model, processor, device):
         return [] # Return empty list if image is None
 
     inputs = processor(images=image, return_tensors="pt")
-    inputs = inputs.to(device) # Move inputs to the selected device
+    inputs = {k: v.to(device) for k, v in inputs.items()} # Move all input tensors to the device
     outputs = model(**inputs)
 
     # Convert outputs (bounding boxes and class logits) to COCO API format
-    target_sizes = torch.tensor([image.size[::-1]], device=device) # Move target_sizes to device
+    # image.size should be (width, height)
+    target_sizes = torch.tensor([image.size[::-1]], device=device) # size is (width, height), tensor wants (height, width)
     results = processor.post_process_object_detection(outputs, target_sizes=target_sizes, threshold=0.5)[0]
     # Changed threshold to 0.5
 
@@ -87,16 +115,15 @@ def detect_layout_objects(image: Image, model, processor, device):
 
     return detected_objects
 
-def draw_boxes_on_image(image: Image, detected_objects, output_path="output_with_boxes.png"):
+def draw_boxes_on_image(image: Optional[PILImage.Image], detected_objects: List[Dict[str, Any]], output_path: str ="output_with_boxes.png"):
     """Draws bounding boxes on an image and saves it."""
-    if image is None or detected_objects is None: # Corrected variable name here
+    if image is None or not detected_objects:
         return
 
     draw = ImageDraw.Draw(image)
-    if detected_objects: # Check if there are objects to draw
-        for obj in detected_objects:
-            # Each box is [xmin, ymin, xmax, ymax]
-            draw.rectangle(obj['box'], outline="red", width=2)
+    for obj in detected_objects:
+        # Each box is [xmin, ymin, xmax, ymax]
+        draw.rectangle(obj['box'], outline="red", width=2)
     image.save(output_path)
     print(f"Saved image with detected boxes to {output_path}")
 
@@ -124,8 +151,14 @@ def main():
         return
     print("Model and processor loaded.")
 
-    # User-provided Poppler path
-    poppler_bin_path = r"C:\cli\poppler-24.08.0\Library\bin" # Consider making this configurable or auto-detected
+    # Get Poppler path from environment variable
+    poppler_bin_path = os.getenv('POPPLER_BIN_PATH')
+    if not poppler_bin_path:
+        print("Warning: POPPLER_BIN_PATH environment variable not set.")
+        print("Please set POPPLER_BIN_PATH to the path of your Poppler bin directory,")
+        print("or ensure Poppler utilities are available in your system PATH.")
+        print("Example: POPPLER_BIN_PATH=C:\\cli\\poppler-24.08.0\\Library\\bin")
+        return
 
     pdf_files = [f for f in os.listdir(PDF_DIR) if f.lower().endswith(".pdf")]
     if not pdf_files:
