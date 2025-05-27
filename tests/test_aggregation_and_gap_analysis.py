@@ -5,61 +5,82 @@ from coi_auditor.pdf_parser import extract_dates_from_pdf
 from coi_auditor.audit import aggregate_dates, check_coverage_gap
 
 def test_aggregation_and_gap_analysis():
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    # .env file is in the project root, one level up from the 'tests' directory
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     dotenv_path = os.path.join(project_root, '.env')
     load_dotenv(dotenv_path=dotenv_path)
-    pdf_dir = os.getenv('PDF_DIRECTORY_PATH')
-    excel_path = os.getenv('EXCEL_FILE_PATH')
-    assert pdf_dir and os.path.isdir(pdf_dir), f"PDF directory not found at {pdf_dir}"
-    assert excel_path and os.path.exists(excel_path), f"Excel file not found at {excel_path}"
-    # Pick a subcontractor with a text-extractable PDF
+
+    # Use a fixture PDF
+    fixtures_dir = os.path.join(project_root, 'tests', 'fixtures')
+    # Choose a fixture known to have extractable dates
+    sample_pdf_name = 'FernandoHernandez_2024-09-19.pdf'
+    pdf_path = os.path.join(fixtures_dir, sample_pdf_name)
+    assert os.path.exists(pdf_path), f"Fixture PDF not found: {pdf_path}"
+
+    from datetime import datetime, date # Ensure date is imported
+
     try:
-        wb = openpyxl.load_workbook(excel_path)
-        sheet = wb.active
+        print(f"Testing aggregation and gap analysis with PDF: {sample_pdf_name}")
+        # extract_dates_from_pdf returns: Tuple[Dict[str, Optional[date]], str]
+        extracted_dates_dict, note_from_parser = extract_dates_from_pdf(pdf_path)
+
+        if not extracted_dates_dict and not note_from_parser:
+            print(f"No dates or notes extracted from {sample_pdf_name}. Cannot proceed with test.")
+            # Consider an assertion failure here if dates are expected from this fixture
+            assert False, f"Fixture {sample_pdf_name} did not yield dates or notes."
+            return
+
+        # aggregate_dates expects: List[Tuple[str, Tuple[Dict[str, Optional[date]], str]]]
+        # So, the second element of the outer tuple must be (dates_dict, note_string)
+        all_pdf_results_for_aggregation = [(str(pdf_path), (extracted_dates_dict, note_from_parser))]
+        
+        aggregated_dates, aggregated_notes = aggregate_dates(all_pdf_results_for_aggregation)
+        
+        print(f"Extracted from PDF: {extracted_dates_dict}, Note: '{note_from_parser}'")
+        print(f"Aggregated Dates: {aggregated_dates}")
+        print(f"Aggregated Notes: {aggregated_notes}")
+
+        # Test gap analysis for GL (assuming fixture has GL dates)
+        audit_start_str = os.getenv('AUDIT_START_DATE')
+        audit_end_str = os.getenv('AUDIT_END_DATE')
+
+        assert audit_start_str, "AUDIT_START_DATE not set in .env"
+        assert audit_end_str, "AUDIT_END_DATE not set in .env"
+
+        audit_start_date = datetime.strptime(audit_start_str, '%Y-%m-%d').date()
+        audit_end_date = datetime.strptime(audit_end_str, '%Y-%m-%d').date()
+
+        gl_from_date = aggregated_dates.get('gl_from')
+        gl_to_date = aggregated_dates.get('gl_to')
+
+        if gl_from_date and gl_to_date:
+            gap_status, gap_details = check_coverage_gap(gl_from_date, gl_to_date, audit_start_date, audit_end_date)
+            print(f"GL Gap Status: {gap_status} | Details: {gap_details}")
+            # Add assertions here based on expected outcome for the fixture
+            # e.g., assert gap_status == "OK", f"Gap detected unexpectedly for GL in {sample_pdf_name}: {gap_details}"
+        else:
+            print(f"GL dates not found in aggregated results for {sample_pdf_name}, skipping GL gap check.")
+            # If GL dates are expected from this fixture, this could be an assertion failure:
+            # assert False, f"Expected GL dates from {sample_pdf_name}, but none found in aggregated results."
+
+
+        # Similar check for WC if applicable for the fixture
+        wc_from_date = aggregated_dates.get('wc_from')
+        wc_to_date = aggregated_dates.get('wc_to')
+        if wc_from_date and wc_to_date:
+            gap_status_wc, gap_details_wc = check_coverage_gap(wc_from_date, wc_to_date, audit_start_date, audit_end_date)
+            print(f"WC Gap Status: {gap_status_wc} | Details: {gap_details_wc}")
+            # Add assertions here based on expected outcome for the fixture
+            # e.g., assert gap_status_wc == "OK", f"Gap detected unexpectedly for WC in {sample_pdf_name}: {gap_details_wc}"
+        else:
+            print(f"WC dates not found in aggregated results for {sample_pdf_name}, skipping WC gap check.")
+            # If WC dates are expected, assert False here too.
+
+        print("test_aggregation_and_gap_analysis PASSED (inspect output for correctness and add specific assertions)")
+
     except Exception as e:
-        print(f"Error loading Excel file: {e}")
-        return
-    header_row = int(os.getenv('EXCEL_HEADER_ROW', '1'))
-    name_col = os.getenv('EXCEL_SUBCONTRACTOR_NAME_COL', 'Subcontractor Name')
-    headers = [cell.value for cell in sheet[header_row]]
-    name_idx = headers.index(name_col) + 1
-    for r in range(header_row+1, sheet.max_row+1):
-        sub_name = sheet.cell(row=r, column=name_idx).value
-        if not sub_name:
-            continue
-        # Try to find a matching PDF with text
-        for pdf_file in os.listdir(pdf_dir):
-            if not pdf_file.lower().endswith('.pdf'):
-                continue
-            pdf_path = os.path.join(pdf_dir, pdf_file)
-            try:
-                with open(pdf_path, 'rb') as f:
-                    pass
-                extracted_dates, note = extract_dates_from_pdf(pdf_path)
-                if any(v for v in extracted_dates.values()):
-                    # Aggregate just this one PDF for test
-                    agg, notes = aggregate_dates([(pdf_path, extracted_dates, note)])
-                    print(f"Subcontractor: {sub_name}")
-                    print(f"PDF: {pdf_file}")
-                    print(f"Extracted: {extracted_dates}")
-                    print(f"Aggregated: {agg}")
-                    # Test gap analysis for GL
-                    audit_start = os.getenv('AUDIT_START_DATE')
-                    audit_end = os.getenv('AUDIT_END_DATE')
-                    from datetime import datetime
-                    if audit_start:
-                        audit_start = datetime.strptime(audit_start, '%Y-%m-%d').date()
-                    if audit_end:
-                        audit_end = datetime.strptime(audit_end, '%Y-%m-%d').date()
-                    gl_from, gl_to = agg.get('gl_from'), agg.get('gl_to')
-                    if gl_from and gl_to:
-                        gap_status, gap_details = check_coverage_gap(gl_from, gl_to, audit_start, audit_end)
-                        print(f"GL Gap Status: {gap_status} | Details: {gap_details}")
-                    print("test_aggregation_and_gap_analysis PASSED")
-                    return
-            except Exception as e:
-                continue
-    print("No suitable subcontractor with extractable PDF found for aggregation test.")
+        print(f"Error during test_aggregation_and_gap_analysis: {e}")
+        raise # Re-raise to fail the test clearly
 
 if __name__ == '__main__':
     test_aggregation_and_gap_analysis()

@@ -3,7 +3,8 @@ from dotenv import load_dotenv
 
 def test_pdf_dir_scanning():
     """Test that the PDF directory exists, is accessible, and all PDF files are listed and normalized."""
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    # .env file is in the project root, one level up from the 'tests' directory
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     dotenv_path = os.path.join(project_root, '.env')
     load_dotenv(dotenv_path=dotenv_path)
 

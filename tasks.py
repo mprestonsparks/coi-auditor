@@ -8,34 +8,50 @@ import os
 import sys
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(PROJECT_ROOT, "coi_auditor", "src")
-TESTS_DIR = os.path.join(PROJECT_ROOT, "coi_auditor", "tests")
+SRC_DIR = os.path.join(PROJECT_ROOT, "src")
+PKG_DIR = os.path.join(SRC_DIR, "coi_auditor") # Actual package directory
+TESTS_DIR = os.path.join(PROJECT_ROOT, "tests")
 LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
 
 @task
 def test(ctx):
     """Run all tests in the tests/ directory."""
-    ctx.run(f"python -m unittest discover -s {TESTS_DIR}", pty=True)
+    # Ensure tests are discovered from the correct directory relative to project root
+    ctx.run(f"python -m unittest discover -s {TESTS_DIR} -p '*_test.py'", pty=True)
 
 @task
 def lint(ctx):
-    """Run pyright type checker on src/ directory."""
-    ctx.run(f"pyright {SRC_DIR}", pty=True)
+    """Run pyright type checker on src/coi_auditor and tests/ directories."""
+    ctx.run(f"pyright {PKG_DIR} {TESTS_DIR}", pty=True)
 
 @task
 def clean_logs(ctx):
-    """Remove all log and txt files from the logs/ directory."""
-    ctx.run(f"del /Q {os.path.join(LOGS_DIR, '*.log')} {os.path.join(LOGS_DIR, '*.txt')}", pty=False, warn=True)
+    """Remove all log and txt files from the logs/ directory (platform-agnostic)."""
+    if not os.path.exists(LOGS_DIR):
+        print(f"Logs directory '{LOGS_DIR}' does not exist. Nothing to clean.")
+        return
+    for filename in os.listdir(LOGS_DIR):
+        if filename.endswith(".log") or filename.endswith(".txt"):
+            file_path = os.path.join(LOGS_DIR, filename)
+            try:
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    print(f"Removed log file: {file_path}")
+            except Exception as e:
+                print(f"Error removing file {file_path}: {e}")
+    print("Log cleaning finished.")
+
 
 @task
 def run(ctx):
     """Run the main COI Auditor script."""
-    ctx.run("python -m coi_auditor.src.main", pty=True)
+    # Assumes running from project root, src is in PYTHONPATH or package installed
+    ctx.run(f"python -m {os.path.basename(SRC_DIR)}.{os.path.basename(PKG_DIR)}.main", pty=True)
 
 @task
 def dump_log(ctx):
     """Dump the audit log using the dump_log utility."""
-    ctx.run("python -m coi_auditor.src.dump_log", pty=True)
+    ctx.run(f"python -m {os.path.basename(SRC_DIR)}.{os.path.basename(PKG_DIR)}.dump_log", pty=True)
 
 @task
 def format(ctx):

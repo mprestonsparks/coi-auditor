@@ -3,7 +3,8 @@ from dotenv import load_dotenv
 
 def test_env_and_config():
     """Test that .env exists, loads, and all required paths are present and valid."""
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    # .env file is in the project root, one level up from the 'tests' directory
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     dotenv_path = os.path.join(project_root, '.env')
     assert os.path.exists(dotenv_path), f".env file not found at {dotenv_path}"
     load_dotenv(dotenv_path=dotenv_path)

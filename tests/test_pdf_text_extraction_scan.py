@@ -3,7 +3,8 @@ from dotenv import load_dotenv
 import pdfplumber
 
 def scan_pdf_text_extraction():
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    # .env file is in the project root, one level up from the 'tests' directory
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     dotenv_path = os.path.join(project_root, '.env')
     load_dotenv(dotenv_path=dotenv_path)
     pdf_dir = os.getenv('PDF_DIRECTORY_PATH')

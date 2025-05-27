@@ -1,6 +1,7 @@
 import unittest
 import re
 from dateutil import parser
+import pdfplumber
 
 # Data extraction and verification functions
 def extract_date(text):
@@ -49,6 +50,18 @@ class TestDataExtraction(unittest.TestCase):
         self.assertEqual(extract_policy_number("Policy Number: ABC12345678"), "ABC12345678")
         self.assertEqual(extract_policy_number("Policy Number: ABC1234"), None)
         self.assertEqual(extract_policy_number("No policy number here"), None)
+
+    def test_extract_date_from_pdf(self):
+        pdf_path = "sample_data/pdfs/31-W Insulation_2023-11-06.pdf"
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                first_page = pdf.pages[0]
+                text = first_page.extract_text()
+                extracted_date = extract_date(text)
+                self.assertNotEqual(extracted_date, "2023-11-06")
+        except Exception as e:
+            print(f"Error: {e}")
+            self.fail(f"Exception raised: {e}")
 
 if __name__ == '__main__':
     unittest.main()

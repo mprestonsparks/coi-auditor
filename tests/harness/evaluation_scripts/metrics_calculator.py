@@ -1,12 +1,23 @@
-import collections
+"""
+Calculates and aggregates metrics for evaluating COI parsing accuracy against ground truth data.
 
-def normalize_policy_type(policy_type_str):
+This module defines functions to:
+- Normalize policy type strings.
+- Compare extracted dates with ground truth dates.
+- Calculate detailed metrics for individual policy types within a document.
+- Calculate overall metrics for a single document (including insured name and all policies).
+- Aggregate metrics across an entire corpus of documents.
+"""
+import collections
+from typing import Dict, Any, Optional, List, DefaultDict
+
+def normalize_policy_type(policy_type_str: Optional[str]) -> str:
     """Normalizes policy type strings for consistent matching."""
     if not policy_type_str:
         return ""
     return policy_type_str.lower().replace(" ", "_").replace("'", "").replace("-", "_")
 
-def compare_dates(extracted_date, ground_truth_date):
+def compare_dates(extracted_date: Optional[str], ground_truth_date: Optional[str]) -> bool:
     """
     Compares two date strings.
     Returns True if they match, False otherwise.
@@ -17,7 +28,7 @@ def compare_dates(extracted_date, ground_truth_date):
                     # For this context, if GT is None, and extracted is None, it's not a 'miss' or 'error'.
     return extracted_date == ground_truth_date
 
-def calculate_policy_metrics(extracted_policy, ground_truth_policy):
+def calculate_policy_metrics(extracted_policy: Dict[str, Optional[str]], ground_truth_policy: Dict[str, Optional[str]]) -> Dict[str, Any]:
     """
     Calculates metrics for a single policy type.
     - Correctly found and matching dates.
@@ -72,7 +83,7 @@ def calculate_policy_metrics(extracted_policy, ground_truth_policy):
 
     return metrics
 
-def calculate_overall_metrics(extracted_data, ground_truth_data):
+def calculate_overall_metrics(extracted_data: Dict[str, Any], ground_truth_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compares all extracted data with ground truth data for a single PDF.
     
@@ -164,7 +175,7 @@ def calculate_overall_metrics(extracted_data, ground_truth_data):
     
     return results
 
-def aggregate_corpus_metrics(all_results):
+def aggregate_corpus_metrics(all_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Aggregates metrics from all processed PDFs in the corpus.
     
@@ -181,8 +192,10 @@ def aggregate_corpus_metrics(all_results):
         "corpus_dates_tp": 0,
         "corpus_dates_fp": 0,
         "corpus_dates_fn": 0,
-        "average_processing_time": 0,
-        "policy_type_breakdown": collections.defaultdict(lambda: {"tp": 0, "fp": 0, "fn": 0, "count": 0})
+        "average_processing_time": 0.0,
+        "policy_type_breakdown": collections.defaultdict(
+            lambda: {"tp": 0, "fp": 0, "fn": 0, "count": 0, "precision": 0.0, "recall": 0.0, "f1_score": 0.0}
+        )
     }
 
     if not all_results:

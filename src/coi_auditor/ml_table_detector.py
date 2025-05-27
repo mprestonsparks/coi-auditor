@@ -1,8 +1,11 @@
+import os # Ensure os is imported
 import torch
 from PIL import Image
-from transformers import AutoImageProcessor, TableTransformerForObjectDetection
-from typing import List, Dict, Any
+from transformers.models.auto.image_processing_auto import AutoImageProcessor
+from transformers.models.table_transformer.modeling_table_transformer import TableTransformerForObjectDetection
+from typing import List, Dict, Any, Optional
 import logging
+from pathlib import Path # Added Path import
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -28,10 +31,10 @@ def initialize_ml_model(model_name: str = "microsoft/table-transformer-detection
 
     try:
         logger.info(f"Loading Table-Transformer model ({model_name}) and processor...")
-        PROCESSOR = AutoImageProcessor.from_pretrained(model_name)
-        MODEL = TableTransformerForObjectDetection.from_pretrained(model_name)
-        MODEL.to(DEVICE)
-        MODEL.eval()
+        PROCESSOR = AutoImageProcessor.from_pretrained(model_name) # Use direct name after specific import
+        MODEL = TableTransformerForObjectDetection.from_pretrained(model_name) # Use direct name
+        MODEL.to(DEVICE) # type: ignore
+        MODEL.eval() # type: ignore
         logger.info("Table-Transformer model and processor loaded successfully and moved to device.")
     except Exception as e:
         logger.error(f"Error loading Table-Transformer model/processor: {e}", exc_info=True)
@@ -64,7 +67,11 @@ def detect_tables_on_page_image(page_image: Image.Image) -> List[Dict[str, Any]]
         except Exception:
             logger.error("Failed to auto-initialize model during detection call.")
             return []
-
+    
+    # Add assertions to help Pylance after potential initialization
+    assert MODEL is not None, "Model not initialized after attempt."
+    assert PROCESSOR is not None, "Processor not initialized after attempt."
+    assert DEVICE is not None, "Device not initialized after attempt."
 
     if page_image is None:
         logger.warning("Received a None image for table detection.")
@@ -72,10 +79,10 @@ def detect_tables_on_page_image(page_image: Image.Image) -> List[Dict[str, Any]]
 
     try:
         inputs = PROCESSOR(images=page_image, return_tensors="pt")
-        inputs = inputs.to(DEVICE)
+        inputs = {k: v.to(DEVICE) for k, v in inputs.items()} # Ensure all input tensors are on device
         outputs = MODEL(**inputs)
 
-        target_sizes = torch.tensor([page_image.size[::-1]], device=DEVICE)
+        target_sizes = torch.tensor([page_image.size[::-1]], device=DEVICE) # page_image is PILImage.Image here
         results = PROCESSOR.post_process_object_detection(outputs, target_sizes=target_sizes, threshold=0.5)[0]
 
         raw_boxes = results["boxes"].tolist()
@@ -84,7 +91,7 @@ def detect_tables_on_page_image(page_image: Image.Image) -> List[Dict[str, Any]]
 
         model_labels_map = MODEL.config.id2label
         
-        detected_objects = []
+        detected_objects: List[Dict[str, Any]] = []
         for i, box_coords in enumerate(raw_boxes):
             label_id = raw_labels[i]
             label_name = model_labels_map[label_id]
@@ -130,22 +137,34 @@ if __name__ == "__main__":
 
     # Create a dummy image for testing (replace with actual image loading if needed)
     try:
-        # Try to load a test image if available, e.g., from the prototype output
-        # This requires a sample image to be present at this path for testing.
-        # For robust testing, mock this or ensure a test image is part of the test setup.
-        test_image_path = "test_harness/prototype_output/FernandoHernandez_2024-09-19_page_0_converted.png"
-        if os.path.exists(test_image_path):
-            dummy_image = Image.open(test_image_path).convert("RGB")
-            print(f"Loaded test image: {test_image_path}")
-        else:
-            print(f"Test image not found at {test_image_path}, creating a blank dummy image.")
-            dummy_image = Image.new('RGB', (800, 1000), color = 'white')
-    except ImportError: # In case Pillow is not available in a minimal test env
-        print("Pillow (PIL) is not available. Cannot create/load dummy image for testing.")
+        # Try to load a test image if available.
+        # The original path pointed to a deleted directory.
+        # Using a PDF from the relocated corpus and converting its first page.
+        # This requires pdf2image and poppler for the test block.
+        from pdf2image import convert_from_path # Local import for test block
+        
+        # Path to a PDF in the test corpus
+        # Note: Poppler path might be needed here if not in system PATH.
+        # Consider adding a poppler_path argument to initialize_ml_model or making it configurable for testing.
+        pdf_for_testing_path = Path(__file__).resolve().parent.parent.parent / "tests" / "harness" / "corpus" / "pdfs" / "FernandoHernandez_2024-09-19.pdf"
         dummy_image = None
-    except FileNotFoundError:
-        print(f"Test image not found at {test_image_path}, creating a blank dummy image.")
-        dummy_image = Image.new('RGB', (800, 1000), color = 'white')
+        if pdf_for_testing_path.exists():
+            try:
+                images = convert_from_path(str(pdf_for_testing_path), first_page=1, last_page=1, dpi=200) # Using lower DPI for test speed
+                if images:
+                    dummy_image = images[0].convert("RGB")
+                    print(f"Loaded and converted first page of test PDF: {pdf_for_testing_path}")
+            except Exception as e_conv:
+                print(f"Could not convert test PDF {pdf_for_testing_path} for testing: {e_conv}")
+        
+        if not dummy_image:
+            print(f"Test PDF {pdf_for_testing_path} not found or failed to convert, creating a blank dummy image.")
+            dummy_image = Image.new('RGB', (800, 1000), color = 'white')
+        # Removed the 'else' block that referenced test_image_path as it's redundant with the above check
+    except ImportError: # In case Pillow or pdf2image is not available
+        print("Pillow (PIL) or pdf2image is not available. Cannot create/load dummy image for testing.")
+        dummy_image = None
+    # FileNotFoundError for pdf_for_testing_path is handled by the .exists() check and subsequent dummy_image creation if needed.
 
 
     if dummy_image and MODEL: # Check if model was initialized

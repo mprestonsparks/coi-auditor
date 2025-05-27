@@ -1,16 +1,32 @@
+"""
+Generates various report formats (text, CSV, JSON) from COI evaluation metrics.
+
+This module takes aggregated corpus metrics and detailed per-file results
+to produce human-readable summaries and machine-parsable data files.
+"""
 import json
 import csv
 import os
 from datetime import datetime
+from typing import Dict, Any, List, Optional
 
 # Attempt to import from metrics_calculator for normalize_policy_type if needed
 try:
     from .metrics_calculator import normalize_policy_type
 except ImportError: # Fallback for direct execution
+    # This fallback might not work if metrics_calculator itself has relative imports
+    # and is not in the Python path when report_generator is run directly.
+    # For robustness, it's better if these scripts are run as part of a package
+    # or with PYTHONPATH set correctly.
     from metrics_calculator import normalize_policy_type
 
 
-def generate_text_summary(corpus_summary_metrics, overall_stats, results_per_file, report_dir="."):
+def generate_text_summary(
+    corpus_summary_metrics: Optional[Dict[str, Any]],
+    overall_stats: Dict[str, Any],
+    results_per_file: List[Dict[str, Any]],
+    report_dir: str = "."
+) -> str:
     """
     Generates a detailed text summary of the evaluation results.
     """
@@ -71,7 +87,7 @@ def generate_text_summary(corpus_summary_metrics, overall_stats, results_per_fil
     return report_content # Also return as string for potential console output
 
 
-def generate_csv_report(results_per_file, report_dir="."):
+def generate_csv_report(results_per_file: List[Dict[str, Any]], report_dir: str = "."):
     """
     Generates a CSV report with detailed results per PDF and per policy type.
     """
@@ -145,7 +161,11 @@ def generate_csv_report(results_per_file, report_dir="."):
         print(f"Error saving CSV report: {e}")
 
 
-def generate_json_report(corpus_summary_metrics, results_per_file, report_dir="."):
+def generate_json_report(
+    corpus_summary_metrics: Optional[Dict[str, Any]],
+    results_per_file: List[Dict[str, Any]],
+    report_dir: str = "."
+):
     """
     Generates a JSON report containing both aggregated and per-file results.
     """

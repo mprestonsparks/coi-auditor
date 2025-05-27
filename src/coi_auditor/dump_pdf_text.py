@@ -1,51 +1,56 @@
+"""
+Utility script to extract and print all text content from a given PDF file.
+Can be called with a PDF path as a command-line argument, or it defaults
+to a test PDF in the `tests/fixtures` directory.
+"""
 import os
-# from dotenv import load_dotenv # No longer needed for direct path
 import pdfplumber
-import sys # To accept command line arguments
+import sys
+from pathlib import Path
 
-def dump_pdf_text(pdf_full_path): # Modified signature
-    # project_root = os.path.dirname(os.path.abspath(__file__)) # Not needed
-    # dotenv_path = os.path.join(project_root, '.env') # Not needed
-    # load_dotenv(dotenv_path=dotenv_path) # Not needed
-    # pdf_dir = os.getenv('PDF_DIRECTORY_PATH') # Not needed
-    # assert pdf_dir and os.path.isdir(pdf_dir), f"PDF directory not found at {pdf_dir}" # Not needed
-    # pdf_files = [f for f in os.listdir(pdf_dir) if f.lower().endswith('.pdf')] # Not needed
-    # # Default to Armor-of-God-Construction_2024-08-19.pdf if present # Not needed
-    # if not pdf_filename: # Not needed
-    #     for f in pdf_files: # Not needed
-    #         if 'Armor-of-God-Construction_2024-08-19.pdf' in f: # Not needed
-    #             pdf_filename = f # Not needed
-    #             break # Not needed
-    #     else: # Not needed
-    #         pdf_filename = pdf_files[0] # Not needed
-    
-    pdf_path = pdf_full_path # Use the direct path
-    if not os.path.isfile(pdf_path):
-        print(f"Error: PDF file not found at {pdf_path}")
+def dump_pdf_text(pdf_full_path: Path):
+    """
+    Opens a PDF file and prints the extracted text from each page.
+
+    Args:
+        pdf_full_path: The absolute Path object to the PDF file.
+    """
+    if not pdf_full_path.is_file():
+        print(f"Error: PDF file not found at {pdf_full_path}")
         return
 
-    print(f"Dumping text for: {os.path.basename(pdf_path)}") # Use basename for cleaner log
-    with pdfplumber.open(pdf_path) as pdf:
-        for i, page in enumerate(pdf.pages):
-            text = page.extract_text()
-            print(f"\n--- Page {i+1} ---\n{text}")
+    print(f"Dumping text for: {pdf_full_path.name}")
+    try:
+        with pdfplumber.open(pdf_full_path) as pdf:
+            if not pdf.pages:
+                print(f"Warning: PDF file '{pdf_full_path.name}' has no pages or is empty.")
+                return
+            for i, page in enumerate(pdf.pages):
+                text = page.extract_text()
+                print(f"\n--- Page {i+1} of {len(pdf.pages)} ---\n")
+                if text:
+                    print(text)
+                else:
+                    print("(No text extracted from this page)")
+    except Exception as e:
+        print(f"Error processing PDF {pdf_full_path.name}: {e}")
 
 if __name__ == '__main__':
-    # Construct the path to the target PDF relative to this script's location
-    # Script is in src/coi_auditor/
-    # PDF is in tests/fixtures/
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    # Corrected relative path for Windows, ensuring forward slashes for os.path.join consistency
-    # or using Path objects if preferred for robustness.
-    # Using os.path.normpath to ensure correct path separators for the OS.
-    target_pdf_relative_path = os.path.normpath('../../tests/fixtures/X-Stream Cleaning_2025-01-07.pdf')
-    target_pdf_full_path = os.path.join(script_dir, target_pdf_relative_path)
+    # Default PDF path construction
+    script_dir = Path(__file__).resolve().parent
+    # Default target is ../../tests/fixtures/X-Stream Cleaning_2025-01-07.pdf
+    default_pdf_path = script_dir.parent.parent / "tests" / "fixtures" / "X-Stream Cleaning_2025-01-07.pdf"
     
-    # Allow overriding with a command-line argument
+    pdf_to_process: Path
+
     if len(sys.argv) > 1:
-        pdf_to_dump = sys.argv[1]
-        if not os.path.isabs(pdf_to_dump): # If relative path given, make it absolute from CWD
-             pdf_to_dump = os.path.abspath(pdf_to_dump)
-        dump_pdf_text(pdf_to_dump)
+        arg_path = Path(sys.argv[1])
+        if arg_path.is_absolute():
+            pdf_to_process = arg_path
+        else:
+            # Assume relative to current working directory if not absolute
+            pdf_to_process = Path.cwd() / arg_path
     else:
-        dump_pdf_text(target_pdf_full_path)
+        pdf_to_process = default_pdf_path
+    
+    dump_pdf_text(pdf_to_process.resolve())

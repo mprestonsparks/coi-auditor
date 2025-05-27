@@ -9,25 +9,19 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 sys.path.insert(0, project_root)
 
 try:
-    # Attempt to import the parser from the coi_auditor src directory
-    from src.coi_auditor.pdf_parser import parse_coi_pdf
-    # A more specific function for date extraction might be needed later
-    # from src.coi_auditor.main import process_single_pdf # Or similar
+    # Attempt to import the main date extraction function
+    from src.coi_auditor.pdf_parser import extract_dates_from_pdf
 except ImportError:
-    print("Error: Could not import from src.coi_auditor. Ensure the script is run from the project root or coi_auditor is in PYTHONPATH.")
+    print("Error: Could not import extract_dates_from_pdf from src.coi_auditor.pdf_parser.")
     print(f"Current sys.path: {sys.path}")
-    # Define a placeholder if the import fails, to allow basic script structure testing
-    def parse_coi_pdf(pdf_path): # pragma: no cover
-        print(f"Warning: Using placeholder parse_coi_pdf for {pdf_path}. Actual parser not imported.")
-        # Placeholder: return structure similar to what the actual parser might return
-        # This structure should align with what `calculate_overall_metrics` expects for `extracted_data`
-        return {
-            "insured_name": "Placeholder Insured",
-            # Keys should be normalized policy types or map to them in metrics_calculator
-            "general_liability": {"effective_date": "2024-01-01", "expiration_date": "2025-01-01"},
-            "workers_compensation": {"effective_date": "2024-03-01", "expiration_date": "2025-03-01"},
-            "automobile_liability": {"effective_date": "2024-02-01", "expiration_date": "2025-02-01"},
-        }
+    # Define a placeholder if the import fails
+    def extract_dates_from_pdf(pdf_path, indicator=None): # pragma: no cover
+        print(f"Warning: Using placeholder extract_dates_from_pdf for {pdf_path}. Actual function not imported.")
+        # This placeholder returns a structure similar to the actual function: (dates_dict, note_str)
+        # However, this structure is NOT what calculate_overall_metrics expects for its `extracted_data` argument.
+        # calculate_overall_metrics expects a dict with 'insured_name' and policy types as keys.
+        # This highlights a mismatch that needs to be resolved for the harness to work.
+        return ({"gl_effective": "2024-01-01", "gl_expiration": "2025-01-01"}, "Placeholder note")
 
 # Import from metrics_calculator
 try:
@@ -93,11 +87,42 @@ def run_evaluation(corpus_dir, reports_output_dir):
         start_time = datetime.now()
 
         try:
-            # This is where the actual COI parser is called
-            # The structure of extracted_data needs to be compatible with what calculate_metrics expects
-            extracted_data = parse_coi_pdf(pdf_path) 
+            # Call the imported date extraction function.
+            # Note: extract_dates_from_pdf returns a tuple: (dates_dict, note_string)
+            # This is NOT the structure expected by calculate_overall_metrics.
+            # calculate_overall_metrics expects a single dictionary containing insured_name
+            # and policy types as keys, with their respective date dicts as values.
+            # This is a major discrepancy that needs to be addressed for the evaluation to be meaningful.
+            # For now, we'll call it and pass its result, but it will likely lead to errors
+            # or incorrect metrics in calculate_overall_metrics.
+            dates_dict, note_str = extract_dates_from_pdf(pdf_path) # indicator might be needed if logic changes
+            
+            # TODO: Bridge the gap between extract_dates_from_pdf output and calculate_overall_metrics input.
+            # This might involve:
+            # 1. Modifying extract_dates_from_pdf to also return insured_name and structure policy types.
+            # 2. Creating an adapter function here to transform the output.
+            # 3. Revising calculate_overall_metrics to accept the current output format (less likely).
+            # For now, creating a placeholder structure for extracted_data based on dates_dict.
+            extracted_data_for_metrics = {
+                "insured_name": "NOT_EXTRACTED_BY_CURRENT_FUNCTION", # Insured name is not part of extract_dates_from_pdf output
+                # Policy types need to be inferred or structured differently by pdf_parser
+                # This is a simplified placeholder:
+                "general_liability": {
+                    "effective_date": dates_dict.get("gl_effective"),
+                    "expiration_date": dates_dict.get("gl_expiration")
+                },
+                "workers_compensation": {
+                    "effective_date": dates_dict.get("wc_effective"),
+                    "expiration_date": dates_dict.get("wc_expiration")
+                },
+                # Add other policy types if extract_dates_from_pdf handles them
+            }
+            # Log the note from the parser
+            if note_str:
+                print(f"  Parser note for {pdf_filename}: {note_str}")
+
         except Exception as e:
-            print(f"Error parsing {pdf_filename}: {e}")
+            print(f"Error calling extract_dates_from_pdf for {pdf_filename}: {e}")
             overall_stats["failed_parsing"] += 1
             continue
         
@@ -105,8 +130,8 @@ def run_evaluation(corpus_dir, reports_output_dir):
         print(f"Processing time: {processing_time:.2f} seconds")
 
         # Compare extracted data with ground truth
-        individual_metrics = calculate_overall_metrics(extracted_data, ground_truth_data)
-        
+        individual_metrics = calculate_overall_metrics(extracted_data_for_metrics, ground_truth_data)
+
         results.append({
             "pdf_file": pdf_filename,
             "processing_time_seconds": processing_time,

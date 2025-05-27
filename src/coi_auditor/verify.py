@@ -1,6 +1,8 @@
 from pathlib import Path
 import openpyxl
-import gc
+import logging
+
+logger = logging.getLogger(__name__)
 
 def workbook_is_clean(path: Path) -> bool:
     """
@@ -37,15 +39,14 @@ def workbook_is_clean(path: Path) -> bool:
                 # Found a row with data after the header
                 return False
         return True
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error verifying workbook '{path}': {e}")
         # If there's any issue opening or reading the workbook,
-        # consider it not clean or log an error.
-        # For this specific check, let's be strict: if we can't verify, it's not clean.
+        # consider it not clean.
         return False
     finally:
         if workbook:
             workbook.close() # Ensure close is called if workbook was opened
-            gc.collect()
 
 if __name__ == '__main__':
     # Example usage (for testing this module directly)
