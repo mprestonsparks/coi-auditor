@@ -28,15 +28,11 @@ GL_TO_KEY = 'GL_TO_COL'
 WC_FROM_KEY = 'WC_FROM_COL'
 WC_TO_KEY = 'WC_TO_COL'
 
-# Actual header names for gap/notes columns if created in a detailed report (not SUMMARY)
+# Note: Gap and notes headers are only used in separate GAPS_REPORT and ERRORS_REPORT worksheets,
+# not in the main SUMMARY worksheet where policy dates are written.
 GL_GAP_HEADER = 'GL Coverage Gap'
 WC_GAP_HEADER = 'WC Coverage Gap'
 NOTES_HEADER = 'Audit Notes'
-
-# This mapping seems to be internal to update_excel now.
-# GL_OUTPUT_COLUMNS = [GL_FROM_KEY, GL_TO_KEY]
-# WC_OUTPUT_COLUMNS = [WC_FROM_KEY, WC_TO_KEY]
-# GAP_OUTPUT_COLUMNS = [GL_GAP_HEADER, WC_GAP_HEADER, NOTES_HEADER]
 
 
 def _find_last_nonempty_row(sheet: Worksheet, col_idx: int, start_row: int, max_row: int) -> int:
@@ -49,7 +45,7 @@ def _find_last_nonempty_row(sheet: Worksheet, col_idx: int, start_row: int, max_
 
 
 def read_subcontractors(excel_path_str: str) -> Tuple[List[Dict[str, Any]], List[Any]]:
-    """Reads subcontractor data from the specified Excel file, specifically from the 'SUMMARY' worksheet."""
+    """Reads subcontractor data from the specified Excel file, from the configured input worksheet."""
     import traceback # Keep local import for this specific error formatting
     
     excel_path = Path(excel_path_str)
@@ -61,14 +57,15 @@ def read_subcontractors(excel_path_str: str) -> Tuple[List[Dict[str, Any]], List
         # Read environment variables here, after .env is loaded
         header_row = int(os.getenv('EXCEL_HEADER_ROW', '6'))
         subcontractor_name_col_header = os.getenv('EXCEL_SUBCONTRACTOR_NAME_COL', 'Name')
+        input_sheet_name = os.getenv('EXCEL_INPUT_SHEET', 'SUMMARY')
         # SUBCONTRACTOR_ID_COL is globally defined
-        logger.info(f"[read_subcontractors] Config: header_row={header_row}, name_col_header='{subcontractor_name_col_header}', id_col_header='{SUBCONTRACTOR_ID_COL}'")
+        logger.info(f"[read_subcontractors] Config: header_row={header_row}, name_col_header='{subcontractor_name_col_header}', id_col_header='{SUBCONTRACTOR_ID_COL}', input_sheet='{input_sheet_name}'")
 
         workbook = openpyxl.load_workbook(excel_path, data_only=True)
-        if 'SUMMARY' not in workbook.sheetnames:
-            raise ValueError("Required worksheet 'SUMMARY' not found in workbook.")
-        sheet: Worksheet = workbook['SUMMARY']
-        logger.info(f"[read_subcontractors] Loaded 'SUMMARY' worksheet. Max row: {sheet.max_row}")
+        if input_sheet_name not in workbook.sheetnames:
+            raise ValueError(f"Required worksheet '{input_sheet_name}' not found in workbook. Available sheets: {workbook.sheetnames}")
+        sheet: Worksheet = workbook[input_sheet_name]
+        logger.info(f"[read_subcontractors] Loaded '{input_sheet_name}' worksheet. Max row: {sheet.max_row}")
         
         current_headers = [cell.value for cell in sheet[header_row]]
         logger.debug(f"Excel headers found (row {header_row}): {current_headers}")
@@ -162,19 +159,19 @@ def read_subcontractors(excel_path_str: str) -> Tuple[List[Dict[str, Any]], List
 
 def get_output_sheet(workbook: openpyxl.Workbook, output_sheet_name_env: Optional[str] = None) -> Worksheet:
     """
-    Returns a worksheet for output. Uses 'SUMMARY' as base.
-    If output_sheet_name_env is provided and different from 'SUMMARY', creates a copy.
+    Returns a worksheet for output. Uses the configured input sheet as base.
+    If output_sheet_name_env is provided and different from the input sheet, creates a copy.
     Raises error if 'export' sheet exists.
     """
-    base_sheet_name = 'SUMMARY'
+    base_sheet_name = os.getenv('EXCEL_INPUT_SHEET', 'SUMMARY')
     if 'export' in workbook.sheetnames: # type: ignore
-        raise ValueError("The 'export' worksheet is present. Please remove it. Only 'SUMMARY' is used.")
+        raise ValueError(f"The 'export' worksheet is present. Please remove it. Only '{base_sheet_name}' is used.")
     if base_sheet_name not in workbook.sheetnames: # type: ignore
-        raise ValueError("Could not find 'SUMMARY' worksheet. It is required.")
+        raise ValueError(f"Could not find '{base_sheet_name}' worksheet. It is required.")
     
     base_sheet: Worksheet = workbook[base_sheet_name] # type: ignore
     
-    # Determine target sheet name from env var or default to SUMMARY
+    # Determine target sheet name from env var or default to the input sheet
     target_sheet_name = output_sheet_name_env or os.getenv('EXCEL_OUTPUT_SHEET', base_sheet_name)
     
     write_policy_dates_to_target = os.getenv('WRITE_POLICY_DATES', 'false').lower() in ('1', 'true', 'yes', 'on')
@@ -184,12 +181,12 @@ def get_output_sheet(workbook: openpyxl.Workbook, output_sheet_name_env: Optiona
             logger.info(f"Using existing sheet '{target_sheet_name}' for output.")
             return workbook[target_sheet_name] # type: ignore
         else:
-            # Create a copy from the base 'SUMMARY' sheet
+            # Create a copy from the base input sheet
             new_sheet = workbook.copy_worksheet(base_sheet) # type: ignore
             new_sheet.title = target_sheet_name
             logger.info(f"Created output worksheet '{target_sheet_name}' as a copy of '{base_sheet_name}'.")
             return new_sheet
-    else: # Default: use SUMMARY sheet directly, or if not writing policy dates to a separate sheet
+    else: # Default: use input sheet directly, or if not writing policy dates to a separate sheet
         logger.info(f"Using '{base_sheet_name}' worksheet for output.")
         return base_sheet
 
@@ -246,7 +243,17 @@ def get_output_sheet(workbook: openpyxl.Workbook, output_sheet_name_env: Optiona
 #             current_insert_offset += 1
 
 def update_excel(excel_path_str: str, results: List[Dict[str, Any]], headers: List[Any]):
-    """Updates the Excel file with audit results. Writes policy dates to the target summary sheet."""
+    """
+    Updates the Excel file with audit results.
+    
+    IMPORTANT: This function ONLY writes policy date data to the specified columns (I, J, K, L).
+    It does NOT:
+    - Write any headers to the worksheet
+    - Create any new columns
+    - Add gap or notes columns to the SUMMARY worksheet
+    
+    The function writes date values to existing cells in the target worksheet.
+    """
     excel_path = Path(excel_path_str)
     try:
         workbook = openpyxl.load_workbook(excel_path)
@@ -255,15 +262,64 @@ def update_excel(excel_path_str: str, results: List[Dict[str, Any]], headers: Li
         # The get_output_sheet function handles creation if EXCEL_OUTPUT_SHEET is different from SUMMARY
         sheet = get_output_sheet(workbook) # output_sheet_name_env is implicitly from os.getenv in get_output_sheet
         
-        # Fixed column mapping for GL and WC dates on the SUMMARY sheet (or its copy)
+        # Column mapping for GL and WC dates on the SUMMARY sheet (or its copy)
+        # Check for environment variables first, then use fixed defaults
         # These are 1-based column indices.
+        
+        def get_column_index(env_var_name: str, default_index: int, column_letter: str) -> int:
+            """Get column index from environment variable or use default."""
+            env_value = os.getenv(env_var_name)
+            if env_value:
+                try:
+                    # If it's a letter (like 'I'), convert to index
+                    if env_value.isalpha():
+                        from openpyxl.utils import column_index_from_string
+                        return column_index_from_string(env_value.upper())
+                    # If it's a number, use it directly
+                    elif env_value.isdigit():
+                        return int(env_value)
+                    else:
+                        logger.warning(f"Invalid {env_var_name} value '{env_value}', using default {column_letter}({default_index})")
+                        return default_index
+                except Exception as e:
+                    logger.warning(f"Error parsing {env_var_name} value '{env_value}': {e}, using default {column_letter}({default_index})")
+                    return default_index
+            return default_index
+        
         col_map = {
-            GL_FROM_KEY: 9,    # Column I
-            GL_TO_KEY: 10,   # Column J
-            WC_FROM_KEY: 11,  # Column K
-            WC_TO_KEY: 12,   # Column L
+            GL_FROM_KEY: get_column_index('GL_FROM_COL', 9, 'I'),    # Column I
+            GL_TO_KEY: get_column_index('GL_TO_COL', 10, 'J'),       # Column J
+            WC_FROM_KEY: get_column_index('WC_FROM_COL', 11, 'K'),   # Column K
+            WC_TO_KEY: get_column_index('WC_TO_COL', 12, 'L'),       # Column L
         }
-        logger.info(f"Using fixed column mapping for date updates on sheet '{sheet.title}': GL From=I(9), GL To=J(10), WC From=K(11), WC To=L(12)")
+        
+        # Log the actual column mapping being used
+        gl_from_letter = get_column_letter(col_map[GL_FROM_KEY])
+        gl_to_letter = get_column_letter(col_map[GL_TO_KEY])
+        wc_from_letter = get_column_letter(col_map[WC_FROM_KEY])
+        wc_to_letter = get_column_letter(col_map[WC_TO_KEY])
+        
+        logger.info(f"Using column mapping for date updates on sheet '{sheet.title}': "
+                   f"GL From={gl_from_letter}({col_map[GL_FROM_KEY]}), "
+                   f"GL To={gl_to_letter}({col_map[GL_TO_KEY]}), "
+                   f"WC From={wc_from_letter}({col_map[WC_FROM_KEY]}), "
+                   f"WC To={wc_to_letter}({col_map[WC_TO_KEY]})")
+        
+        # Validation: Ensure we're writing to the correct columns (I, J, K, L)
+        expected_columns = {'I': 9, 'J': 10, 'K': 11, 'L': 12}
+        actual_columns = {
+            gl_from_letter: col_map[GL_FROM_KEY],
+            gl_to_letter: col_map[GL_TO_KEY],
+            wc_from_letter: col_map[WC_FROM_KEY],
+            wc_to_letter: col_map[WC_TO_KEY]
+        }
+        
+        # Check if any columns are outside the expected range
+        for letter, index in actual_columns.items():
+            if letter not in expected_columns:
+                logger.warning(f"Column mapping validation: {letter}({index}) is not in expected columns I, J, K, L")
+            elif expected_columns[letter] != index:
+                logger.warning(f"Column mapping validation: {letter} should be index {expected_columns[letter]} but is {index}")
         
         update_count = 0
         # Sort by row index to process consistently, though not strictly necessary for this update logic.
@@ -272,6 +328,7 @@ def update_excel(excel_path_str: str, results: List[Dict[str, Any]], headers: Li
             if not row_idx or not isinstance(row_idx, int):
                 logger.warning(f"Skipping result with missing or invalid 'row' identifier: {result.get('name', 'N/A')}")
                 continue
+
 
             def format_date_cell_for_excel(dt_val: Any) -> Optional[dt.datetime]:
                 """Converts date to datetime for Excel compatibility, returns None otherwise."""
@@ -294,6 +351,7 @@ def update_excel(excel_path_str: str, results: List[Dict[str, Any]], headers: Li
                     # Get the cell object from the sheet.
                     target_cell = sheet.cell(row=row_idx, column=col_map[key_col])
                     original_cell_coordinate = target_cell.coordinate
+                    
                     
                     was_merged_and_unmerged = False
                     # Iterate over a copy of merged_cells.ranges because unmerging modifies the collection.
@@ -323,6 +381,7 @@ def update_excel(excel_path_str: str, results: List[Dict[str, Any]], headers: Li
                 # If these need to be written to the *same* sheet, their column indices need to be defined.
                 # The current structure implies they are for a separate GAPS_REPORT/ERRORS_REPORT.
 
+                
                 update_count += 1
             except Exception as cell_e:
                 logger.error(f"Error updating cell for row {row_idx}, sub '{result.get('name', 'N/A')}': {cell_e}", exc_info=True)
@@ -572,9 +631,6 @@ def create_error_report_workbook_for_validation(output_path: Path, errors_data: 
         raise
     finally:
         if 'workbook' in locals() and workbook: workbook.close()
-        logging.error(f"Failed to save validation error report {output_path}: {e}", exc_info=True)
-        # Re-raise
-        raise
 
 
 if __name__ == '__main__':

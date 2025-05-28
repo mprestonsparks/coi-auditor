@@ -12,13 +12,162 @@ from rich.console import Console
 
 logger = logging.getLogger(__name__)
 
+class CustomConsoleHandler(logging.Handler):
+    """A custom console handler that processes Rich markup and converts to ANSI codes."""
+    
+    def __init__(self, level: int = logging.NOTSET):
+        super().__init__(level)
+        self.color_supported = self._detect_color_support()
+        
+    def _detect_color_support(self) -> bool:
+        """Detect if the terminal supports color output."""
+        import sys
+        import os
+        
+        # Check environment variables
+        if os.getenv('NO_COLOR'):
+            return False
+            
+        if os.getenv('FORCE_COLOR'):
+            return True
+            
+        # Check if we're in a terminal
+        if not sys.stdout.isatty():
+            return False
+            
+        # Check TERM environment variable
+        term = os.getenv('TERM', '').lower()
+        if any(term_type in term for term_type in ['color', 'ansi', 'xterm', 'screen']):
+            return True
+            
+        # Windows-specific checks
+        if os.name == 'nt':
+            # Windows 10 version 1607 and later support ANSI escape sequences
+            try:
+                import platform
+                version = platform.version()
+                if version:
+                    # Extract build number
+                    build = int(version.split('.')[-1])
+                    return build >= 14393  # Windows 10 build 1607
+            except (ValueError, AttributeError):
+                pass
+                
+            # Check for Windows Terminal or other modern terminals
+            if os.getenv('WT_SESSION') or os.getenv('TERM_PROGRAM'):
+                return True
+                
+        return False
+    
+    def _parse_rich_markup(self, text: str) -> str:
+        """Parse Rich-style markup tags and convert to ANSI codes."""
+        import re
+        
+        if not self.color_supported:
+            # Remove all markup tags if colors aren't supported
+            return re.sub(r'\[/?[^\]]+\]', '', text)
+        
+        # ANSI color codes
+        colors = {
+            'black': '\033[30m',
+            'red': '\033[31m',
+            'green': '\033[32m',
+            'yellow': '\033[33m',
+            'blue': '\033[34m',
+            'magenta': '\033[35m',
+            'cyan': '\033[36m',
+            'white': '\033[37m',
+            'bright_black': '\033[90m',
+            'bright_red': '\033[91m',
+            'bright_green': '\033[92m',
+            'bright_yellow': '\033[93m',
+            'bright_blue': '\033[94m',
+            'bright_magenta': '\033[95m',
+            'bright_cyan': '\033[96m',
+            'bright_white': '\033[97m',
+        }
+        
+        # ANSI style codes
+        styles = {
+            'bold': '\033[1m',
+            'dim': '\033[2m',
+            'italic': '\033[3m',
+            'underline': '\033[4m',
+        }
+        
+        reset = '\033[0m'
+        
+        # Handle combined style and color tags like [bold red]
+        def replace_tag(match):
+            tag_content = match.group(1)
+            is_closing = tag_content.startswith('/')
+            
+            if is_closing:
+                return reset
+            
+            parts = tag_content.split()
+            codes = []
+            
+            for part in parts:
+                if part in styles:
+                    codes.append(styles[part])
+                elif part in colors:
+                    codes.append(colors[part])
+                # Handle color aliases
+                elif part == 'grey':
+                    codes.append(colors['bright_black'])
+                elif part == 'orange':
+                    codes.append(colors['yellow'])
+            
+            return ''.join(codes)
+        
+        # Replace tags
+        text = re.sub(r'\[([^\]]+)\]', replace_tag, text)
+        
+        return text
+    
+    def emit(self, record: logging.LogRecord) -> None:
+        """Emit a log record with proper markup processing."""
+        try:
+            message = self.format(record)
+            
+            # Parse Rich markup
+            formatted_message = self._parse_rich_markup(message)
+            
+            # Add timestamp and level formatting
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            
+            if self.color_supported:
+                level_colors = {
+                    'DEBUG': '\033[90m',     # bright_black
+                    'INFO': '\033[94m',      # bright_blue
+                    'WARNING': '\033[93m',   # bright_yellow
+                    'ERROR': '\033[91m',     # bright_red
+                    'CRITICAL': '\033[91m\033[1m',  # bright_red + bold
+                }
+                
+                level_color = level_colors.get(record.levelname, '')
+                reset = '\033[0m'
+                time_color = '\033[90m'  # bright_black for timestamp
+                
+                output = f'{time_color}[{timestamp}]{reset} {level_color}[{record.levelname}]{reset} {formatted_message}'
+            else:
+                output = f'[{timestamp}] [{record.levelname}] {formatted_message}'
+            
+            print(output)
+            
+        except Exception:
+            # Last resort: plain text
+            print(f"[{record.levelname}] {record.getMessage()}")
+
 def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> None:
     """
-    Sets up logging using RichHandler for console and optionally a FileHandler.
+    Sets up logging with a custom handler that processes Rich markup properly.
     """
     log_level = getattr(logging, level.upper(), logging.INFO)
     
-    # Basic formatter for file logs, RichHandler handles its own console formatting
+    # Basic formatter for file logs
     file_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     
     # Configure root logger
@@ -35,17 +184,9 @@ def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> None:
     # Ensure our package loggers inherit the new root settings
     logging.getLogger("coi_auditor").setLevel(logging.DEBUG)
     
-    # Add RichHandler for console output
-    console = Console(stderr=True) # Log to stderr by default like standard logging
-    rich_handler = RichHandler(
-        level=log_level,
-        console=console,
-        rich_tracebacks=True,
-        markup=True, # Enable Rich markup in log messages
-        tracebacks_show_locals=True,
-        tracebacks_width=console.width # Use full console width for tracebacks
-    )
-    root_logger.addHandler(rich_handler)
+    # Use a custom handler that processes Rich markup
+    console_handler = CustomConsoleHandler(level=log_level)
+    root_logger.addHandler(console_handler)
     
     if log_file:
         log_file_path = Path(log_file)
@@ -67,11 +208,18 @@ def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> None:
     logger.info(f"Logging setup complete. Console level: [yellow]{level.upper()}[/yellow].")
 
 
-def load_config() -> Dict[str, Any]:
-    """Load configuration from config.yaml and .env file."""
+def load_config(test_mode: bool = False) -> Dict[str, Any]:
+    """Load configuration from config.yaml and .env file.
+    
+    Args:
+        test_mode: If True, use test fixtures instead of production paths
+    """
     is_validation_mode = os.getenv('COI_VALIDATION_MODE') == '1'
     if is_validation_mode:
         logger.info("COI_VALIDATION_MODE is active. Path requirements (EXCEL_FILE_PATH, PDF_DIRECTORY_PATH, OUTPUT_DIRECTORY_PATH) will be relaxed.")
+    
+    if test_mode:
+        logger.info("Test mode is active. Using test fixtures instead of production data.")
 
     # Determine the project root directory.
     # config.py is located at project_root/src/coi_auditor/config.py
@@ -139,6 +287,14 @@ def load_config() -> Dict[str, Any]:
         env_value = os.getenv(env_var_key)
         if env_value is not None:
             config[config_key] = env_value # .env overrides if present
+
+    # Override paths for test mode
+    if test_mode:
+        logger.info("Overriding paths for test mode...")
+        config['excel_file_path'] = 'tests/fixtures/test_subcontractors.xlsx'
+        config['pdf_directory_path'] = 'tests/fixtures/'
+        logger.info(f"Test mode Excel path: [cyan]{config['excel_file_path']}[/cyan]")
+        logger.info(f"Test mode PDF directory: [cyan]{config['pdf_directory_path']}[/cyan]")
 
     # Handle dates specifically from .env (as they need parsing and validation)
     audit_start_date_env = os.getenv('AUDIT_START_DATE')

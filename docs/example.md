@@ -21,7 +21,7 @@ Below is a single‐file Python script, `audit_coi.py`, which implements the ent
    ```ini
    EXCEL_PATH=C:/Users/Butle/Documents/Scott/SBH/Insurance/Insurance Audits/2025 Audits/Subcontractor-Payments.xlsx
    PDF_DIR=C:/Users/Butle/Documents/Scott/SBH/Insurance/Insurance Audits/2025 Audits/Subcontractor COIs
-   SHEET_NAME=SUMMARY (with Policy Dates)
+   SHEET_NAME=SUMMARY
    AUDIT_START=2024-05-01
    AUDIT_END=2025-05-01
    ```
@@ -54,7 +54,7 @@ load_dotenv()  # picks up .env in cwd
 
 EXCEL_PATH = os.getenv("EXCEL_PATH")
 PDF_DIR    = os.getenv("PDF_DIR")
-SHEET_NAME = os.getenv("SHEET_NAME", "SUMMARY (with Policy Dates)")
+SHEET_NAME = os.getenv("SHEET_NAME", "SUMMARY")
 
 # audit window
 AUDIT_START = datetime.fromisoformat(os.getenv("AUDIT_START")).date()

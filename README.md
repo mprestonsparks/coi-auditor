@@ -51,6 +51,8 @@ This script automates the process of auditing Certificates of Insurance (COIs) f
 
 ## Usage
 
+### Main Application
+
 To run the COI Auditor main application:
 ```bash
 coi-auditor
@@ -63,6 +65,98 @@ python tasks.py run
 The script will process the files and output:
 - An updated Excel file (modified in place).
 - A `gaps_report.csv` file in the specified output directory.
+
+### Diagnostic Tools
+
+The COI Auditor includes diagnostic tools to help troubleshoot PDF discovery issues and understand the fuzzy matching process.
+
+#### Diagnose PDF Discovery Issues
+
+To diagnose why a specific subcontractor's PDF files are not being found:
+
+```bash
+coi-auditor --diagnose "Subcontractor Name"
+```
+
+Optional parameters:
+- `--pdf-directory`: Specify a different PDF directory (overrides config)
+- `--output-file`: Save detailed diagnostic results to a JSON file
+
+Examples:
+```bash
+# Basic diagnostic
+coi-auditor --diagnose "ABC Construction LLC"
+
+# Diagnostic with custom PDF directory
+coi-auditor --diagnose "ABC Construction LLC" --pdf-directory "/path/to/pdfs"
+
+# Diagnostic with JSON output for detailed analysis
+coi-auditor --diagnose "ABC Construction LLC" --output-file "diagnostic_results.json"
+```
+
+The diagnostic tool provides:
+- **Directory Analysis**: Validates PDF directory structure and accessibility
+- **Name Normalization**: Shows how the subcontractor name is processed for matching
+- **Exact Matching Test**: Tests exact filename matching
+- **Fuzzy Matching Analysis**: Tests fuzzy matching with detailed scores
+- **Configuration Review**: Shows current fuzzy matching settings
+- **Actionable Recommendations**: Specific suggestions for resolving issues
+
+#### Fuzzy Matching Configuration
+
+The fuzzy matching system can be configured in `config.yaml`:
+
+```yaml
+fuzzy_matching:
+  enabled: true
+  threshold: 75.0  # Minimum similarity percentage (0-100)
+  max_results: 5   # Maximum number of matches to return
+  algorithms:      # Matching algorithms to use
+    - ratio
+    - partial_ratio
+    - token_sort_ratio
+    - token_set_ratio
+
+name_normalization:
+  generate_variations: true
+  business_terms:      # Map business terms to standardized forms
+    llc: llc
+    inc: inc
+    corp: corp
+    company: company
+    co: co
+    ltd: ltd
+    limited: limited
+```
+
+#### Troubleshooting Guide
+
+**Common Issues and Solutions:**
+
+1. **No PDF files found**
+   - Verify the PDF directory path in your `.env` file
+   - Check that PDF files exist in the directory
+   - Ensure the directory structure matches the expected format
+
+2. **Exact matching fails**
+   - Compare the subcontractor name in Excel with PDF filenames
+   - Check for extra spaces, punctuation, or formatting differences
+   - Use the diagnostic tool to see normalized name variations
+
+3. **Fuzzy matching threshold too high**
+   - Lower the `threshold` value in `config.yaml` (try 60-70%)
+   - Use the diagnostic tool to see actual similarity scores
+   - Consider adjusting the matching algorithms used
+
+4. **Business name variations not recognized**
+   - Add common business terms to the `business_terms` mapping
+   - Enable `generate_variations` to create additional name forms
+   - Check the diagnostic output for generated variations
+
+5. **Directory structure issues**
+   - Ensure PDFs are in a "Subcontractor COIs" folder (or configure alternative names)
+   - Check the `folder_structure` settings in `config.yaml`
+   - Use the diagnostic tool to verify directory detection
 
 ## Development Tasks
 

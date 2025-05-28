@@ -20,7 +20,8 @@ dependencies = [
     "rich>=13.0.0",
     "tqdm>=4.60.0",
     "pdf2image>=1.16.0", # Added for PDF to image conversion
-    "opencv-python>=4.5.0" # Added for image processing with PaddleOCR
+    "opencv-python>=4.5.0", # Added for image processing with PaddleOCR
+    "rapidfuzz>=3.6.0" # Added for fuzzy matching capabilities
 ]
 
 [project.optional-dependencies]

@@ -3,12 +3,38 @@ import logging
 import math
 import os
 import re
+import json
 from pathlib import Path
 from datetime import date, datetime
 from coi_auditor.config import load_config # Assuming load_config is the correct accessor
 CONFIG = load_config()
 
 logger = logging.getLogger(__name__)
+
+# Import rapidfuzz for fuzzy matching
+try:
+    from rapidfuzz import fuzz, process
+    RAPIDFUZZ_AVAILABLE = True
+except ImportError:
+    # Create dummy objects to avoid unbound variable errors
+    class DummyFuzz:
+        @staticmethod
+        def ratio(*args, **kwargs):
+            return 0.0
+        @staticmethod
+        def partial_ratio(*args, **kwargs):
+            return 0.0
+        @staticmethod
+        def token_sort_ratio(*args, **kwargs):
+            return 0.0
+        @staticmethod
+        def token_set_ratio(*args, **kwargs):
+            return 0.0
+    
+    fuzz = DummyFuzz()
+    process = None
+    RAPIDFUZZ_AVAILABLE = False
+    logger.warning("rapidfuzz library not found. Fuzzy matching will be disabled. Install with: pip install rapidfuzz>=3.6.0")
 
 # PDF and Date Parsing Libraries
 try:
@@ -300,14 +326,177 @@ def _normalize_name(name: str) -> str:
     name = re.sub(r'[^\w]', '', name) # Remove non-alphanumeric characters (keeps letters, numbers, underscore)
     return name
 
-def find_coi_pdfs(pdf_directory_path: str, subcontractor_name: str, direct_pdf_path: Optional[Path] = None) -> List[Tuple[str, str]]:
+def _normalize_name_enhanced(name: str) -> str:
+    """
+    Enhanced name normalization that preserves business terms and handles common variations.
+    
+    Args:
+        name: The name to normalize
+        
+    Returns:
+        Normalized name with business terms preserved
+    """
+    if not name:
+        return ""
+    
+    # Get business terms from config
+    business_terms = CONFIG.get('name_normalization', {}).get('business_terms', {})
+    
+    # Convert to lowercase for processing
+    normalized = name.lower().strip()
+    
+    # Replace common punctuation with spaces for better tokenization
+    normalized = re.sub(r'[&\-_\.,;:]', ' ', normalized)
+    
+    # Split into tokens
+    tokens = normalized.split()
+    
+    # Process each token
+    processed_tokens = []
+    for token in tokens:
+        # Remove non-alphanumeric characters from token
+        clean_token = re.sub(r'[^\w]', '', token)
+        if not clean_token:
+            continue
+            
+        # Check if token matches a business term
+        if clean_token in business_terms:
+            processed_tokens.append(business_terms[clean_token])
+        else:
+            processed_tokens.append(clean_token)
+    
+    return ''.join(processed_tokens)
+
+def _get_normalized_variations(name: str) -> List[str]:
+    """
+    Generate multiple normalized variations of a name for better fuzzy matching.
+    
+    Args:
+        name: The original name
+        
+    Returns:
+        List of normalized variations
+    """
+    if not name:
+        return []
+    
+    variations = []
+    
+    # Original enhanced normalization
+    enhanced_norm = _normalize_name_enhanced(name)
+    if enhanced_norm:
+        variations.append(enhanced_norm)
+    
+    # Original simple normalization (for backward compatibility)
+    simple_norm = _normalize_name(name)
+    if simple_norm and simple_norm not in variations:
+        variations.append(simple_norm)
+    
+    # Generate variations if enabled in config
+    if CONFIG.get('name_normalization', {}).get('generate_variations', True):
+        # Remove common business suffixes for additional variation
+        business_suffixes = ['llc', 'inc', 'corp', 'company', 'co', 'ltd', 'limited']
+        base_name = enhanced_norm
+        for suffix in business_suffixes:
+            if base_name.endswith(suffix):
+                base_without_suffix = base_name[:-len(suffix)].strip()
+                if base_without_suffix and base_without_suffix not in variations:
+                    variations.append(base_without_suffix)
+                break
+        
+        # Add variation with spaces removed from original
+        no_spaces = re.sub(r'\s+', '', name.lower())
+        no_spaces_clean = re.sub(r'[^\w]', '', no_spaces)
+        if no_spaces_clean and no_spaces_clean not in variations:
+            variations.append(no_spaces_clean)
+    
+    return variations
+
+def find_best_fuzzy_matches(target_name: str, candidate_files: List[str], threshold: float = 75.0, max_results: int = 5) -> List[Tuple[str, float]]:
+    """
+    Find the best fuzzy matches for a target name among candidate files using rapidfuzz.
+    
+    Args:
+        target_name: The name to search for
+        candidate_files: List of candidate filenames (without extensions)
+        threshold: Minimum similarity threshold (0-100)
+        max_results: Maximum number of results to return
+        
+    Returns:
+        List of tuples (filename, score) sorted by score descending
+    """
+    if not RAPIDFUZZ_AVAILABLE:
+        logger.warning("rapidfuzz not available, cannot perform fuzzy matching")
+        return []
+    
+    if not target_name or not candidate_files:
+        return []
+    
+    # Get fuzzy matching configuration
+    fuzzy_config = CONFIG.get('fuzzy_matching', {})
+    algorithms = fuzzy_config.get('algorithms', ['ratio', 'partial_ratio', 'token_sort_ratio'])
+    
+    # Generate normalized variations of the target name
+    target_variations = _get_normalized_variations(target_name)
+    
+    logger.debug(f"Fuzzy matching target '{target_name}' with {len(target_variations)} variations: {target_variations}")
+    
+    # Score each candidate file
+    scored_matches = []
+    
+    for candidate in candidate_files:
+        # Generate variations for the candidate
+        candidate_variations = _get_normalized_variations(candidate)
+        
+        best_score = 0.0
+        best_algorithm = ""
+        
+        # Test all combinations of target and candidate variations
+        for target_var in target_variations:
+            for candidate_var in candidate_variations:
+                # Try each configured algorithm
+                for algorithm in algorithms:
+                    try:
+                        if algorithm == 'ratio':
+                            score = fuzz.ratio(target_var, candidate_var)
+                        elif algorithm == 'partial_ratio':
+                            score = fuzz.partial_ratio(target_var, candidate_var)
+                        elif algorithm == 'token_sort_ratio':
+                            score = fuzz.token_sort_ratio(target_var, candidate_var)
+                        elif algorithm == 'token_set_ratio':
+                            score = fuzz.token_set_ratio(target_var, candidate_var)
+                        else:
+                            logger.warning(f"Unknown fuzzy matching algorithm: {algorithm}")
+                            continue
+                        
+                        if score > best_score:
+                            best_score = score
+                            best_algorithm = algorithm
+                            
+                    except Exception as e:
+                        logger.warning(f"Error in fuzzy matching with algorithm {algorithm}: {e}")
+                        continue
+        
+        if best_score >= threshold:
+            scored_matches.append((candidate, best_score, best_algorithm))
+            logger.debug(f"Fuzzy match: '{candidate}' -> {best_score:.1f}% (algorithm: {best_algorithm})")
+    
+    # Sort by score descending and limit results
+    scored_matches.sort(key=lambda x: x[1], reverse=True)
+    
+    # Return only filename and score (drop algorithm info)
+    return [(filename, score) for filename, score, _ in scored_matches[:max_results]]
+
+def find_coi_pdfs(pdf_directory_path: str, subcontractor_name: str, direct_pdf_path: Optional[Path] = None, fuzzy_config: Optional[Dict[str, Any]] = None) -> List[Tuple[str, str]]:
     """
     Finds COI PDF files for a given subcontractor name in a specified directory or via a direct path.
+    Uses exact matching first, then falls back to fuzzy matching if enabled and no exact matches found.
 
     Args:
         pdf_directory_path: The path to the directory containing PDF files.
         subcontractor_name: The name of the subcontractor to search for.
         direct_pdf_path: An optional direct path to a specific PDF file.
+        fuzzy_config: Optional fuzzy matching configuration parameters.
 
     Returns:
         A list of tuples, where each tuple contains:
@@ -381,27 +570,12 @@ def find_coi_pdfs(pdf_directory_path: str, subcontractor_name: str, direct_pdf_p
 
     logger.info(f"Effectively searching for PDFs for subcontractor '{subcontractor_name}' (normalized: '{normalized_sub_name}') in directory '{search_dir_to_use}'")
 
+    # Collect all PDF files for both exact and fuzzy matching
+    pdf_files = []
     try:
         for item_name in os.listdir(search_dir_to_use):
             if item_name.lower().endswith('.pdf'):
-                # Construct Path object for easier manipulation and normalization
-                full_item_path = search_dir_to_use / item_name
-                # Normalize filename (without extension) for matching
-                # Path.stem extracts the filename without the final extension
-                filename_stem_normalized = _normalize_name(full_item_path.stem)
-                
-                # Guard against empty normalized_sub_name and perform match
-                if normalized_sub_name and normalized_sub_name in filename_stem_normalized:
-                    abs_item_path = full_item_path.resolve()
-                    logger.debug(f"Found potential match: '{abs_item_path}' for subcontractor '{subcontractor_name}'")
-                    found_pdfs.append((str(abs_item_path), subcontractor_name))
-                # Example of a slightly more lenient check (optional, can be expanded):
-                # elif subcontractor_name.lower().split()[0] in full_item_path.stem.lower(): # Check if first word of sub name is in filename
-                #     abs_item_path = full_item_path.resolve()
-                #     logger.debug(f"Found lenient match based on first word: '{abs_item_path}' for subcontractor '{subcontractor_name}'")
-                #     found_pdfs.append((str(abs_item_path), subcontractor_name))
-
-
+                pdf_files.append(item_name)
     except OSError as e:
         logger.error(f"OS error accessing PDF directory '{pdf_directory_path}': {e}")
         return []
@@ -409,10 +583,83 @@ def find_coi_pdfs(pdf_directory_path: str, subcontractor_name: str, direct_pdf_p
         logger.error(f"An unexpected error occurred while searching for PDFs in '{pdf_directory_path}': {e}", exc_info=True)
         return []
 
+    if not pdf_files:
+        logger.warning(f"No PDF files found in directory '{search_dir_to_use}'")
+        return []
+
+    # Step 1: Try exact matching (existing logic)
+    logger.debug(f"Attempting exact matching for '{subcontractor_name}' among {len(pdf_files)} PDF files")
+    
+    try:
+        for item_name in pdf_files:
+            # Construct Path object for easier manipulation and normalization
+            full_item_path = search_dir_to_use / item_name
+            # Normalize filename (without extension) for matching
+            # Path.stem extracts the filename without the final extension
+            filename_stem_normalized = _normalize_name(full_item_path.stem)
+            
+            # Guard against empty normalized_sub_name and perform match
+            if normalized_sub_name and normalized_sub_name in filename_stem_normalized:
+                abs_item_path = full_item_path.resolve()
+                logger.debug(f"Found exact match: '{abs_item_path}' for subcontractor '{subcontractor_name}'")
+                found_pdfs.append((str(abs_item_path), subcontractor_name))
+
+    except Exception as e:
+        logger.error(f"Error during exact matching: {e}", exc_info=True)
+
+    # Step 2: If no exact matches found, try fuzzy matching (if enabled)
     if not found_pdfs:
-        logger.warning(f"No PDF files found for subcontractor '{subcontractor_name}' in '{pdf_directory_path}'.")
+        # Get fuzzy matching configuration
+        default_fuzzy_config = CONFIG.get('fuzzy_matching', {})
+        effective_fuzzy_config = fuzzy_config if fuzzy_config else default_fuzzy_config
+        
+        fuzzy_enabled = effective_fuzzy_config.get('enabled', True)
+        
+        if fuzzy_enabled and RAPIDFUZZ_AVAILABLE:
+            logger.info(f"No exact matches found for '{subcontractor_name}'. Attempting fuzzy matching...")
+            
+            # Extract filenames without extensions for fuzzy matching
+            candidate_stems = [Path(pdf_file).stem for pdf_file in pdf_files]
+            
+            # Get fuzzy matching parameters
+            threshold = effective_fuzzy_config.get('threshold', 75.0)
+            max_results = effective_fuzzy_config.get('max_results', 5)
+            
+            # Perform fuzzy matching
+            fuzzy_matches = find_best_fuzzy_matches(
+                target_name=subcontractor_name,
+                candidate_files=candidate_stems,
+                threshold=threshold,
+                max_results=max_results
+            )
+            
+            if fuzzy_matches:
+                logger.info(f"Found {len(fuzzy_matches)} fuzzy matches for '{subcontractor_name}':")
+                for filename_stem, score in fuzzy_matches:
+                    # Find the corresponding PDF file
+                    matching_pdf = None
+                    for pdf_file in pdf_files:
+                        if Path(pdf_file).stem == filename_stem:
+                            matching_pdf = pdf_file
+                            break
+                    
+                    if matching_pdf:
+                        full_item_path = search_dir_to_use / matching_pdf
+                        abs_item_path = full_item_path.resolve()
+                        found_pdfs.append((str(abs_item_path), subcontractor_name))
+                        logger.info(f"  - '{matching_pdf}' (similarity: {score:.1f}%)")
+            else:
+                logger.warning(f"No fuzzy matches found for '{subcontractor_name}' above threshold {threshold}%")
+        elif not fuzzy_enabled:
+            logger.debug(f"Fuzzy matching disabled for '{subcontractor_name}'")
+        elif not RAPIDFUZZ_AVAILABLE:
+            logger.warning(f"Fuzzy matching requested but rapidfuzz library not available for '{subcontractor_name}'")
+
+    if not found_pdfs:
+        logger.warning(f"No PDF files found for subcontractor '{subcontractor_name}' in '{pdf_directory_path}' using exact or fuzzy matching.")
     else:
-        logger.info(f"Found {len(found_pdfs)} PDF(s) for subcontractor '{subcontractor_name}'.")
+        match_type = "exact" if len(found_pdfs) == 1 else "fuzzy" if not any(normalized_sub_name in _normalize_name(Path(pdf[0]).stem) for pdf, _ in found_pdfs) else "mixed"
+        logger.info(f"Found {len(found_pdfs)} PDF(s) for subcontractor '{subcontractor_name}' using {match_type} matching.")
         
     return found_pdfs
 
@@ -511,6 +758,7 @@ def extract_raw_ocr_text_from_pdf(pdf_path: Path, notes: List[str]) -> str:
     back to PaddleOCR. Includes CRITICAL debug logging.
     """
     # notes: List[str] = [] # REMOVED
+    
     pypdf_text = _extract_text_from_pdf_pypdf(pdf_path, notes)
 
     # --- CONFIG-DRIVEN OCR DECISION ---
@@ -522,19 +770,14 @@ def extract_raw_ocr_text_from_pdf(pdf_path: Path, notes: List[str]) -> str:
     attempt_ocr = (total_len < min_len)
 
     if attempt_ocr:
-        logger.critical(
-            f"DEBUG_OCR: Activating OCR because extracted text length "
-            f"is {total_len} (< {min_len}). Notes: {notes}"
-        )
+        logger.debug(f"Activating OCR because extracted text length is {total_len} (< {min_len})")
     else:
-        logger.info(
-            f"DEBUG_OCR: Skipping OCR (len={total_len} ≥ {min_len})."
-        )
+        logger.debug(f"Skipping OCR (len={total_len} ≥ {min_len})")
 
     if attempt_ocr:
-        logger.critical(f"DEBUG_OCR: Condition met to attempt PaddleOCR for {pdf_path.name}. pypdf_text (len {len(pypdf_text.strip()) if pypdf_text else 'N/A'}): '{pypdf_text[:50] if pypdf_text else 'None'}...'. Notes from pypdf: {notes}")
+        logger.debug(f"Attempting PaddleOCR for {pdf_path.name}")
         try:
-            logger.critical(f"DEBUG_OCR: Pre-flight — import OCR deps & convert PDF for {pdf_path.name}")
+            logger.debug(f"Importing OCR dependencies and converting PDF for {pdf_path.name}")
             from paddleocr import PaddleOCR
             from pdf2image import convert_from_path
             import numpy as np
@@ -542,7 +785,7 @@ def extract_raw_ocr_text_from_pdf(pdf_path: Path, notes: List[str]) -> str:
 
             # Consider initializing PaddleOCR engine once globally for performance.
             ocr_engine = PaddleOCR(use_angle_cls=True, lang='en', show_log=False, use_gpu=False) # Restored initialization
-            logger.critical(f"DEBUG_OCR: Initialized PaddleOCR engine for {pdf_path.name}.")
+            logger.debug(f"Initialized PaddleOCR engine for {pdf_path.name}")
             
             # Check for Poppler path if on Windows, as pdf2image might need it.
             # This should ideally be handled by environment setup or a config check.
@@ -551,7 +794,7 @@ def extract_raw_ocr_text_from_pdf(pdf_path: Path, notes: List[str]) -> str:
                 images = convert_from_path(pdf_path, poppler_path=Path(poppler_path_env))
             else:
                 images = convert_from_path(pdf_path)
-            logger.critical(f"DEBUG_OCR: Converted PDF to {len(images)} image(s) for {pdf_path.name}.")
+            logger.debug(f"Converted PDF to {len(images)} image(s) for {pdf_path.name}")
             
             all_ocr_extracted_text_parts = []
             for i, pil_image in enumerate(images):
@@ -560,7 +803,7 @@ def extract_raw_ocr_text_from_pdf(pdf_path: Path, notes: List[str]) -> str:
                 
                 ocr_result_for_image = ocr_engine.ocr(img_np, cls=True) # Perform OCR
                 # Log the raw result structure for debugging
-                logger.critical(f"DEBUG_OCR: PaddleOCR raw result for page {i+1} of {pdf_path.name} (type: {type(ocr_result_for_image)}): {str(ocr_result_for_image)[:300]}...")
+                logger.debug(f"PaddleOCR result for page {i+1} of {pdf_path.name}")
 
                 page_text_parts = []
                 # PaddleOCR can return None or list of lists/Nones. Example: [[[[box], ('text', conf)], ...]] or [None]
@@ -571,25 +814,23 @@ def extract_raw_ocr_text_from_pdf(pdf_path: Path, notes: List[str]) -> str:
                                if line_data and len(line_data) == 2 and isinstance(line_data[1], tuple) and len(line_data[1]) == 2:
                                    page_text_parts.append(line_data[1][0])
                                else:
-                                   logger.critical(f"DEBUG_OCR: Unexpected line_data structure for page {i+1}: {line_data}")
+                                   logger.debug(f"Unexpected line_data structure for page {i+1}: {line_data}")
                 
                 if page_text_parts:
                     all_ocr_extracted_text_parts.append(" ".join(page_text_parts))
-                logger.critical(f"DEBUG_OCR: PaddleOCR extracted from page {i+1} of {pdf_path.name} (text len {len(' '.join(page_text_parts))}): {' '.join(page_text_parts)[:100]}...")
+                logger.debug(f"PaddleOCR extracted from page {i+1} of {pdf_path.name} (text len {len(' '.join(page_text_parts))})")
 
             final_ocr_text = "\n".join(all_ocr_extracted_text_parts).strip()
 
             if final_ocr_text:
-                logger.critical(f"DEBUG_OCR: PaddleOCR SUCCESS for {pdf_path.name}. Total text length: {len(final_ocr_text)}. Returning OCR text.")
+                logger.debug(f"PaddleOCR SUCCESS for {pdf_path.name}. Total text length: {len(final_ocr_text)}")
                 return final_ocr_text
             else:
-                logger.critical(f"DEBUG_OCR: PaddleOCR found NO TEXT for {pdf_path.name}. pypdf_text was '{pypdf_text[:50] if pypdf_text else 'None'}...'. Returning pypdf_text.")
+                logger.debug(f"PaddleOCR found no text for {pdf_path.name}. Returning pypdf text")
                 return pypdf_text if pypdf_text is not None else ""
 
         except Exception as e_ocr: # This will catch ImportError as well
-            logger.exception(
-                f"DEBUG_OCR: Unhandled exception during OCR on {pdf_path.name}", exc_info=True
-            )
+            logger.exception(f"Unhandled exception during OCR on {pdf_path.name}", exc_info=True)
             # It's important to decide if notes should still be appended here.
             # The expert's diff doesn't explicitly show it, but for consistency:
             if isinstance(e_ocr, ImportError):
@@ -599,7 +840,7 @@ def extract_raw_ocr_text_from_pdf(pdf_path: Path, notes: List[str]) -> str:
             return pypdf_text if pypdf_text is not None else "" # Added fallback return
             # or return from within the try if successful.
     else:
-        logger.critical(f"DEBUG_OCR: NOT Attempting PaddleOCR for {pdf_path.name}. pypdf_text (len {len(pypdf_text.strip()) if pypdf_text else 'N/A'}): '{pypdf_text[:50] if pypdf_text else 'None'}...'. Notes from pypdf: {notes}. Using pypdf output.")
+        logger.debug(f"Not attempting PaddleOCR for {pdf_path.name}. Using pypdf output")
         for note in notes: # Log original pypdf notes if not attempting OCR
             if "error" in note.lower() or "failed" in note.lower() or "not found" in note.lower() or "no text extracted" in note.lower():
                  logger.debug(f"Note during pypdf text extraction for {pdf_path.name} (when not attempting OCR): {note}")
@@ -631,6 +872,7 @@ def extract_dates_from_pdf(pdf_path: Union[Path, str], indicator: Optional[str] 
     }
     notes: List[str] = []
     context_indicator = f" (Indicator: {indicator})" if indicator else ""
+    
     logger.info(f"Starting date extraction for PDF: '{pdf_path.name}'{context_indicator}")
 
     if not pdf_path.exists() or not pdf_path.is_file():
@@ -645,7 +887,7 @@ def extract_dates_from_pdf(pdf_path: Union[Path, str], indicator: Optional[str] 
         logger.warning(f"Text extraction failed or PDF '{pdf_path.name}' was empty.")
         return extracted_dates, notes
     
-    # logger.debug(f"Extracted text from '{pdf_path.name}' (first 500 chars):\n{pdf_text[:500]}")
+    logger.debug(f"Successfully extracted text from '{pdf_path.name}' (length: {len(pdf_text)} chars)")
 
     # Step 2: Find all potential date strings using regex
     found_date_strings: List[str] = []
@@ -694,11 +936,11 @@ def extract_dates_from_pdf(pdf_path: Union[Path, str], indicator: Optional[str] 
     else:
         logger.debug(f"Found {len(unique_date_strings)} unique potential date strings in '{pdf_path.name}'. Sample: {unique_date_strings[:10]}")
 
-
     for date_str in unique_date_strings:
         dt = _parse_date_string(date_str, notes)
         if dt and dt not in parsed_dates:
             parsed_dates.append(dt)
+            logger.debug(f"Successfully parsed date '{date_str}' -> {dt}")
     
     parsed_dates.sort() # Sort dates chronologically
 
@@ -708,8 +950,6 @@ def extract_dates_from_pdf(pdf_path: Union[Path, str], indicator: Optional[str] 
         return extracted_dates, notes
     
     logger.debug(f"Successfully parsed {len(parsed_dates)} unique dates from '{pdf_path.name}'. Dates: {parsed_dates}")
-    
-    # Context-aware date assignment logging
     logger.debug(f"Starting context-aware date assignment for {len(parsed_dates)} dates")
 
     # Step 3: Attempt to associate dates with policy types and roles (Simplified approach)
@@ -899,4 +1139,252 @@ def extract_dates_from_pdf(pdf_path: Union[Path, str], indicator: Optional[str] 
        (not extracted_dates['wc_eff_date'] and extracted_dates['wc_exp_date']):
         notes.append("WC: Only one date (effective or expiration) found or assigned. Ambiguous.")
 
+
     return extracted_dates, notes
+
+def diagnose_pdf_discovery(subcontractor_name: str, pdf_directory_path: Optional[str] = None, output_file: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Provides detailed diagnostics for PDF discovery failures and fuzzy matching analysis.
+    
+    Args:
+        subcontractor_name: The name of the subcontractor to diagnose
+        pdf_directory_path: Optional PDF directory path (uses config default if not provided)
+        output_file: Optional JSON output file path for detailed analysis
+        
+    Returns:
+        Dictionary containing diagnostic results and recommendations
+    """
+    logger.info(f"Starting PDF discovery diagnostics for subcontractor: '{subcontractor_name}'")
+    
+    # Initialize diagnostic results
+    diagnostic_results = {
+        'subcontractor_name': subcontractor_name,
+        'timestamp': datetime.now().isoformat(),
+        'config_used': {},
+        'directory_analysis': {},
+        'pdf_discovery': {},
+        'exact_matching': {},
+        'fuzzy_matching': {},
+        'recommendations': [],
+        'summary': {}
+    }
+    
+    try:
+        # 1. Analyze configuration
+        diagnostic_results['config_used'] = {
+            'fuzzy_matching_enabled': CONFIG.get('fuzzy_matching', {}).get('enabled', True),
+            'fuzzy_threshold': CONFIG.get('fuzzy_matching', {}).get('threshold', 75.0),
+            'fuzzy_algorithms': CONFIG.get('fuzzy_matching', {}).get('algorithms', ['ratio', 'partial_ratio', 'token_sort_ratio']),
+            'expected_folder_name': CONFIG.get('folder_structure', {}).get('coi_folder_name', 'Subcontractor COIs'),
+            'alternative_folder_names': CONFIG.get('folder_structure', {}).get('alternative_folder_names', []),
+            'business_terms': CONFIG.get('name_normalization', {}).get('business_terms', {}),
+            'generate_variations': CONFIG.get('name_normalization', {}).get('generate_variations', True)
+        }
+        
+        # 2. Directory validation
+        effective_pdf_dir = pdf_directory_path or CONFIG.get('pdf_directory_path', '')
+        diagnostic_results['directory_analysis'] = {
+            'configured_path': effective_pdf_dir,
+            'path_exists': os.path.exists(effective_pdf_dir) if effective_pdf_dir else False,
+            'is_directory': os.path.isdir(effective_pdf_dir) if effective_pdf_dir else False,
+            'accessible': False,
+            'pdf_count': 0,
+            'sample_files': []
+        }
+        
+        if effective_pdf_dir and os.path.isdir(effective_pdf_dir):
+            try:
+                # Check directory structure
+                initial_path = Path(effective_pdf_dir)
+                expected_folder = CONFIG.get('folder_structure', {}).get('coi_folder_name', 'Subcontractor COIs')
+                alternative_folders = CONFIG.get('folder_structure', {}).get('alternative_folder_names', [])
+                all_folder_names = [expected_folder] + alternative_folders
+                
+                # Determine effective search directory
+                search_dir = None
+                if initial_path.name in all_folder_names:
+                    search_dir = initial_path
+                    diagnostic_results['directory_analysis']['effective_search_dir'] = str(search_dir)
+                    diagnostic_results['directory_analysis']['directory_type'] = 'recognized_coi_directory'
+                else:
+                    # Look for subdirectories
+                    for folder_name in all_folder_names:
+                        potential_dir = initial_path / folder_name
+                        if potential_dir.is_dir():
+                            search_dir = potential_dir
+                            diagnostic_results['directory_analysis']['effective_search_dir'] = str(search_dir)
+                            diagnostic_results['directory_analysis']['directory_type'] = 'found_coi_subdirectory'
+                            break
+                    
+                    if not search_dir:
+                        search_dir = initial_path
+                        diagnostic_results['directory_analysis']['effective_search_dir'] = str(search_dir)
+                        diagnostic_results['directory_analysis']['directory_type'] = 'using_configured_path'
+                
+                # Scan for PDF files
+                pdf_files = []
+                for item in os.listdir(search_dir):
+                    if item.lower().endswith('.pdf'):
+                        pdf_files.append(item)
+                
+                diagnostic_results['directory_analysis']['accessible'] = True
+                diagnostic_results['directory_analysis']['pdf_count'] = len(pdf_files)
+                diagnostic_results['directory_analysis']['sample_files'] = pdf_files[:10]  # First 10 files as sample
+                
+            except Exception as e:
+                diagnostic_results['directory_analysis']['error'] = str(e)
+                logger.error(f"Error accessing directory '{effective_pdf_dir}': {e}")
+        
+        # 3. Name normalization analysis
+        normalized_name = _normalize_name(subcontractor_name)
+        enhanced_normalized = _normalize_name_enhanced(subcontractor_name)
+        name_variations = _get_normalized_variations(subcontractor_name)
+        
+        diagnostic_results['name_analysis'] = {
+            'original_name': subcontractor_name,
+            'simple_normalized': normalized_name,
+            'enhanced_normalized': enhanced_normalized,
+            'all_variations': name_variations,
+            'variation_count': len(name_variations)
+        }
+        
+        # 4. PDF discovery testing
+        if diagnostic_results['directory_analysis']['accessible'] and diagnostic_results['directory_analysis']['pdf_count'] > 0:
+            # Test exact matching
+            found_pdfs_exact = find_coi_pdfs(
+                pdf_directory_path=effective_pdf_dir,
+                subcontractor_name=subcontractor_name,
+                fuzzy_config={'enabled': False}  # Disable fuzzy for exact test
+            )
+            
+            diagnostic_results['exact_matching'] = {
+                'matches_found': len(found_pdfs_exact),
+                'matched_files': [os.path.basename(pdf_path) for pdf_path, _ in found_pdfs_exact]
+            }
+            
+            # Test fuzzy matching with lower threshold for analysis
+            fuzzy_config_diagnostic = {
+                'enabled': True,
+                'threshold': 50.0,  # Lower threshold for diagnostic purposes
+                'max_results': 10
+            }
+            
+            found_pdfs_fuzzy = find_coi_pdfs(
+                pdf_directory_path=effective_pdf_dir,
+                subcontractor_name=subcontractor_name,
+                fuzzy_config=fuzzy_config_diagnostic
+            )
+            
+            # Get detailed fuzzy scores
+            pdf_files = diagnostic_results['directory_analysis']['sample_files']
+            if len(pdf_files) > 10:
+                # Get all PDF files for comprehensive analysis
+                search_dir = Path(diagnostic_results['directory_analysis']['effective_search_dir'])
+                pdf_files = [f for f in os.listdir(search_dir) if f.lower().endswith('.pdf')]
+            
+            candidate_stems = [Path(pdf_file).stem for pdf_file in pdf_files]
+            fuzzy_scores = find_best_fuzzy_matches(
+                target_name=subcontractor_name,
+                candidate_files=candidate_stems,
+                threshold=0.0,  # Get all scores
+                max_results=20
+            )
+            
+            diagnostic_results['fuzzy_matching'] = {
+                'matches_found': len(found_pdfs_fuzzy),
+                'matched_files': [os.path.basename(pdf_path) for pdf_path, _ in found_pdfs_fuzzy],
+                'all_scores': fuzzy_scores[:20],  # Top 20 scores
+                'threshold_used': fuzzy_config_diagnostic['threshold'],
+                'rapidfuzz_available': RAPIDFUZZ_AVAILABLE
+            }
+            
+            # 5. Generate recommendations
+            recommendations = []
+            
+            if not found_pdfs_exact and not found_pdfs_fuzzy:
+                recommendations.append("No PDF files found with exact or fuzzy matching. Check if the subcontractor name matches any PDF filenames.")
+                recommendations.append(f"Searched in directory: {diagnostic_results['directory_analysis']['effective_search_dir']}")
+                recommendations.append(f"Found {diagnostic_results['directory_analysis']['pdf_count']} PDF files total.")
+                
+                if fuzzy_scores:
+                    best_score = fuzzy_scores[0][1]
+                    recommendations.append(f"Best fuzzy match score: {best_score:.1f}% for '{fuzzy_scores[0][0]}'")
+                    if best_score < 50:
+                        recommendations.append("Consider checking if the subcontractor name in Excel matches the PDF filename format.")
+                    elif best_score < 75:
+                        recommendations.append(f"Consider lowering fuzzy matching threshold below {best_score:.1f}% or verify the filename format.")
+            
+            elif found_pdfs_exact:
+                recommendations.append(f"Exact matching successful: found {len(found_pdfs_exact)} PDF(s).")
+                
+            elif found_pdfs_fuzzy:
+                recommendations.append(f"Fuzzy matching successful: found {len(found_pdfs_fuzzy)} PDF(s).")
+                if fuzzy_scores:
+                    best_score = fuzzy_scores[0][1]
+                    recommendations.append(f"Best match score: {best_score:.1f}%")
+                    if best_score < 75:
+                        recommendations.append("Consider verifying the match quality or adjusting the fuzzy matching threshold.")
+            
+            if not RAPIDFUZZ_AVAILABLE:
+                recommendations.append("rapidfuzz library not available. Install with: pip install rapidfuzz>=3.6.0")
+            
+            if diagnostic_results['directory_analysis']['directory_type'] == 'using_configured_path':
+                expected_folder = CONFIG.get('folder_structure', {}).get('coi_folder_name', 'Subcontractor COIs')
+                recommendations.append(f"Consider organizing PDFs in a '{expected_folder}' subdirectory for better organization.")
+            
+            # Name variation recommendations
+            if len(name_variations) > 1:
+                recommendations.append(f"Generated {len(name_variations)} name variations for matching: {name_variations}")
+            
+            diagnostic_results['recommendations'] = recommendations
+        
+        else:
+            diagnostic_results['recommendations'] = [
+                "Cannot perform PDF discovery testing due to directory access issues.",
+                f"Verify that the directory path '{effective_pdf_dir}' exists and contains PDF files."
+            ]
+        
+        # 6. Generate summary
+        summary = {
+            'directory_accessible': diagnostic_results['directory_analysis']['accessible'],
+            'pdf_files_found': diagnostic_results['directory_analysis']['pdf_count'],
+            'exact_matches': diagnostic_results.get('exact_matching', {}).get('matches_found', 0),
+            'fuzzy_matches': diagnostic_results.get('fuzzy_matching', {}).get('matches_found', 0),
+            'rapidfuzz_available': RAPIDFUZZ_AVAILABLE,
+            'name_variations_generated': len(name_variations)
+        }
+        
+        if summary['exact_matches'] > 0:
+            summary['status'] = 'success_exact'
+        elif summary['fuzzy_matches'] > 0:
+            summary['status'] = 'success_fuzzy'
+        elif not summary['directory_accessible']:
+            summary['status'] = 'directory_error'
+        elif summary['pdf_files_found'] == 0:
+            summary['status'] = 'no_pdfs_found'
+        else:
+            summary['status'] = 'no_matches_found'
+        
+        diagnostic_results['summary'] = summary
+        
+        # 7. Save to output file if specified
+        if output_file:
+            try:
+                output_path = Path(output_file)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    json.dump(diagnostic_results, f, indent=2, default=str)
+                logger.info(f"Diagnostic results saved to: {output_path}")
+                diagnostic_results['output_file_saved'] = str(output_path)
+            except Exception as e:
+                logger.error(f"Failed to save diagnostic results to '{output_file}': {e}")
+                diagnostic_results['output_file_error'] = str(e)
+        
+        logger.info(f"PDF discovery diagnostics completed for '{subcontractor_name}'. Status: {summary['status']}")
+        return diagnostic_results
+        
+    except Exception as e:
+        logger.error(f"Error during PDF discovery diagnostics for '{subcontractor_name}': {e}", exc_info=True)
+        diagnostic_results['error'] = str(e)
+        diagnostic_results['summary'] = {'status': 'diagnostic_error'}
+        return diagnostic_results

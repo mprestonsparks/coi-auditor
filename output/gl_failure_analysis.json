@@ -1,0 +1,93 @@
+{
+  "total_subcontractors": 5,
+  "successful_extractions": 4,
+  "failed_extractions": 1,
+  "failure_mode_stats": {
+    "PARTIAL_GL_DATES": 1
+  },
+  "success_mode_stats": {
+    "FULL_SUCCESS": 5
+  },
+  "detailed_results": {
+    "31-W Insulation": {
+      "name": "31-W Insulation",
+      "id": "31W-002",
+      "success": true,
+      "failure_mode": null,
+      "pdfs_found_count": 2,
+      "pdfs_processed_count": 2,
+      "gl_dates_extracted_count": 6,
+      "final_gl_dates": {
+        "gl_from": "2023-11-01",
+        "gl_to": "2025-11-01"
+      },
+      "notes": [
+        "Full pipeline successful - GL dates extracted and aggregated"
+      ]
+    },
+    "Fernando Hernandez": {
+      "name": "Fernando Hernandez",
+      "id": "FH-001",
+      "success": true,
+      "failure_mode": null,
+      "pdfs_found_count": 1,
+      "pdfs_processed_count": 1,
+      "gl_dates_extracted_count": 2,
+      "final_gl_dates": {
+        "gl_from": "2023-11-05",
+        "gl_to": "2024-09-19"
+      },
+      "notes": [
+        "Full pipeline successful - GL dates extracted and aggregated"
+      ]
+    },
+    "S&G Siding and Gutters": {
+      "name": "S&G Siding and Gutters",
+      "id": "SG-001",
+      "success": true,
+      "failure_mode": null,
+      "pdfs_found_count": 1,
+      "pdfs_processed_count": 1,
+      "gl_dates_extracted_count": 2,
+      "final_gl_dates": {
+        "gl_from": "2023-09-01",
+        "gl_to": "2023-09-03"
+      },
+      "notes": [
+        "Full pipeline successful - GL dates extracted and aggregated"
+      ]
+    },
+    "Sainz Construction": {
+      "name": "Sainz Construction",
+      "id": "SC-001",
+      "success": false,
+      "failure_mode": "PARTIAL_GL_DATES",
+      "pdfs_found_count": 1,
+      "pdfs_processed_count": 1,
+      "gl_dates_extracted_count": 1,
+      "final_gl_dates": {
+        "gl_from": "2024-01-28",
+        "gl_to": null
+      },
+      "notes": [
+        "Partial GL dates - missing either effective or expiration date"
+      ]
+    },
+    "X-Stream Cleaning": {
+      "name": "X-Stream Cleaning",
+      "id": "XS-001",
+      "success": true,
+      "failure_mode": null,
+      "pdfs_found_count": 1,
+      "pdfs_processed_count": 1,
+      "gl_dates_extracted_count": 2,
+      "final_gl_dates": {
+        "gl_from": "2025-01-07",
+        "gl_to": "2025-02-02"
+      },
+      "notes": [
+        "Full pipeline successful - GL dates extracted and aggregated"
+      ]
+    }
+  }
+}

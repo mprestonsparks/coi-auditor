@@ -35,20 +35,26 @@ def aggregate_dates(all_dates_results: List[Tuple[str, Tuple[Dict[str, Optional[
     all_wc_expiration: List[date] = []
     notes: List[str] = []
 
+
     valid_pdf_processed = False
     # Each item in all_dates_results is (pdf_path, (dates_dict, notes_list_from_parser))
     for pdf_path, extraction_result in all_dates_results:
         dates_dict, notes_list_from_parser = extraction_result
+        
         if dates_dict: # Check if dates_dict is not None
             gl_eff = dates_dict.get('gl_eff_date')
             gl_exp = dates_dict.get('gl_exp_date')
             wc_eff = dates_dict.get('wc_eff_date')
             wc_exp = dates_dict.get('wc_exp_date')
 
-            if gl_eff: all_gl_effective.append(gl_eff)
-            if gl_exp: all_gl_expiration.append(gl_exp)
-            if wc_eff: all_wc_effective.append(wc_eff)
-            if wc_exp: all_wc_expiration.append(wc_exp)
+            if gl_eff:
+                all_gl_effective.append(gl_eff)
+            if gl_exp:
+                all_gl_expiration.append(gl_exp)
+            if wc_eff:
+                all_wc_effective.append(wc_eff)
+            if wc_exp:
+                all_wc_expiration.append(wc_exp)
             if gl_eff or gl_exp or wc_eff or wc_exp: # Check if any date was found
                 valid_pdf_processed = True # Mark that at least one PDF yielded potential dates
         
@@ -67,6 +73,7 @@ def aggregate_dates(all_dates_results: List[Tuple[str, Tuple[Dict[str, Optional[
         'wc_from': min(all_wc_effective) if all_wc_effective else None,
         'wc_to': max(all_wc_expiration) if all_wc_expiration else None,
     }
+    
     
     # If no PDFs were processed successfully, add a specific note
     if not valid_pdf_processed and not notes: # Check if notes list is also empty
@@ -128,6 +135,7 @@ def process_subcontractor(subcontractor: Dict[str, Any], config: Dict[str, Any],
     audit_end = config['audit_end_date']
     
     logger.info(f"--- Processing Subcontractor: [bold cyan]{sub_name}[/bold cyan] (ID: {sub_id}) ---")
+    
     if direct_pdf_path:
         logger.info(f"Using direct PDF path for [cyan]{sub_name}[/cyan]: [green]{direct_pdf_path}[/green]")
     
@@ -146,9 +154,11 @@ def process_subcontractor(subcontractor: Dict[str, Any], config: Dict[str, Any],
     gap_report_entries: List[Dict[str, Any]] = [] # List to hold detailed gap info for CSV
     all_pdf_results: List[Tuple[str, Tuple[Dict[str, Optional[date]], List[str]]]] = []
 
+    # Extract fuzzy matching configuration from config
+    fuzzy_config = config.get('fuzzy_matching', {})
 
     # 1. Find associated PDFs
-    coi_pdfs = find_coi_pdfs(pdf_dir, sub_name, direct_pdf_path=direct_pdf_path)
+    coi_pdfs = find_coi_pdfs(pdf_dir, sub_name, direct_pdf_path=direct_pdf_path, fuzzy_config=fuzzy_config)
     
     if not coi_pdfs:
         log_message = f"No COI PDFs found for [cyan]{sub_name}[/cyan]."
@@ -177,15 +187,18 @@ def process_subcontractor(subcontractor: Dict[str, Any], config: Dict[str, Any],
     pdf_processing_errors = False
     for pdf_path_str, indicator in coi_pdfs: # pdf_path_str is a string path
         pdf_path_obj = Path(pdf_path_str) # Convert to Path object if needed by extract_dates_from_pdf
+        
         logger.debug(f"Parsing PDF: [green]{os.path.basename(pdf_path_str)}[/green] for [cyan]{sub_name}[/cyan] (indicator: {indicator})")
         
         extraction_data_tuple: Tuple[Dict[str, Optional[date]], List[str]] = ({}, []) # Default empty result
         try:
             extraction_data_tuple = extract_dates_from_pdf(pdf_path_obj, indicator=indicator)
+            
+                
         except Exception as e:
             error_note = f"Critical error during PDF processing of [yellow]{os.path.basename(pdf_path_str)}[/yellow]: {e}"
             logger.error(f"[bold red]{error_note}[/bold red]", exc_info=True)
-            extraction_data_tuple = ({}, [error_note]) 
+            extraction_data_tuple = ({}, [error_note])
 
         all_pdf_results.append((pdf_path_str, extraction_data_tuple))
         
@@ -216,6 +229,7 @@ def process_subcontractor(subcontractor: Dict[str, Any], config: Dict[str, Any],
     result['gl_to'] = aggregated_dates.get('gl_to')
     result['wc_from'] = aggregated_dates.get('wc_from')
     result['wc_to'] = aggregated_dates.get('wc_to')
+    
     
     # Prepend existing notes if any, then add new combined notes
     existing_notes = result['notes']
@@ -349,6 +363,7 @@ def process_subcontractor(subcontractor: Dict[str, Any], config: Dict[str, Any],
             "File Path": "N/A (No relevant PDFs or dates found)",
             "Page Number": "N/A"
          })
+
 
 
     return result, gap_report_entries

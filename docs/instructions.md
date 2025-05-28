@@ -21,7 +21,7 @@ Any policy that begins _after_ the start date or ends _before_ the end date cons
 1. **Excel Workbook**  
    - **Path:** configured via `.env` (e.g.  
      `EXCEL_PATH=C:/…/Subcontractor-Payments.xlsx`)  
-   - **Sheet:** `SUMMARY (with Policy Dates)`  
+   - **Sheet:** `SUMMARY`
    - **Key columns:**  
      - **Name** (column B)  
      - **GL Policy Coverage Dates → From/To**  
