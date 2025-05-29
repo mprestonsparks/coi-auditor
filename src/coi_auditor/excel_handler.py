@@ -13,7 +13,7 @@ from openpyxl.utils import column_index_from_string
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font
 from openpyxl.worksheet.worksheet import Worksheet # For type hinting sheet parameters
-from .audit import STATUS_GAP # Import necessary constants
+from .constants import STATUS_GAP, STATUS_MISSING_PDF, STATUS_MISSING_DATES, STATUS_PDF_ERROR # Import necessary constants
 
 logger = logging.getLogger(__name__)
 
@@ -463,13 +463,18 @@ def _apply_basic_formatting(worksheet: Optional[Worksheet], header_row_idx: int 
         logger.debug(f"Skipping freeze panes for sheet '{sheet_title}' as it only contains the header row or is empty.")
 
 def write_gaps_report(output_dir_str: str, gaps: List[Dict[str, Any]], excel_path_str: Optional[str] = None):
-    """Writes the gap report to a CSV file, and GAPS_REPORT/ERRORS_REPORT worksheets to Excel if excel_path_str is provided."""
+    """Writes separate gap and error CSV files, and GAPS_REPORT/ERRORS_REPORT worksheets to Excel if excel_path_str is provided."""
     output_dir = Path(output_dir_str)
-    report_path_csv = output_dir / 'gaps_report.csv'
+    gaps_report_csv = output_dir / 'gaps_report.csv'
+    errors_report_csv = output_dir / 'errors_report.csv'
     
     if not gaps:
         logger.info("No gaps or issues found to report. Skipping CSV and worksheet generation.")
         return
+
+    # Separate business gaps from technical errors
+    gap_rows_data = [g for g in gaps if g.get('Issue Type') in [STATUS_GAP, "Certificate Not Provided"]]
+    error_rows_data = [g for g in gaps if g.get('Issue Type') in ["PDF Technical Failure", STATUS_MISSING_PDF, STATUS_MISSING_DATES, STATUS_PDF_ERROR]]
 
     try:
         # Define a more comprehensive set of standard fieldnames for CSV
@@ -482,17 +487,26 @@ def write_gaps_report(output_dir_str: str, gaps: List[Dict[str, Any]], excel_pat
         # Ensure standard fields come first, then any others, without duplicates
         fieldnames_for_csv = list(dict.fromkeys(fieldnames_std_csv + sorted(list(all_actual_keys - set(fieldnames_std_csv)))))
         
-        with open(report_path_csv, 'w', newline='', encoding='utf-8') as csvfile:
+        # Write gaps CSV (business issues only)
+        with open(gaps_report_csv, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames_for_csv, extrasaction='ignore')
             writer.writeheader()
-            writer.writerows(gaps)
-        logger.info(f"Gaps report CSV saved to {report_path_csv}")
-    except PermissionError:
-        logger.error(f"Permission denied writing gaps report CSV: {report_path_csv}. Check file permissions or if it's open.")
+            writer.writerows(gap_rows_data)
+        logger.info(f"Gaps report CSV saved to {gaps_report_csv} with {len(gap_rows_data)} business gap entries")
+        
+        # Write errors CSV (technical failures only)
+        with open(errors_report_csv, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames_for_csv, extrasaction='ignore')
+            writer.writeheader()
+            writer.writerows(error_rows_data)
+        logger.info(f"Errors report CSV saved to {errors_report_csv} with {len(error_rows_data)} technical error entries")
+        
+    except PermissionError as pe:
+        logger.error(f"Permission denied writing report CSVs: {pe}. Check file permissions or if files are open.")
         raise
     except Exception as e_csv:
-        logger.error(f"Error writing gaps report CSV to {report_path_csv}: {e_csv}")
-        raise Exception(f"Error writing gaps report CSV to {report_path_csv}: {e_csv}")
+        logger.error(f"Error writing report CSVs: {e_csv}")
+        raise Exception(f"Error writing report CSVs: {e_csv}")
 
     if excel_path_str:
         excel_path_obj = Path(excel_path_str)
@@ -500,8 +514,8 @@ def write_gaps_report(output_dir_str: str, gaps: List[Dict[str, Any]], excel_pat
         try:
             workbook = openpyxl.load_workbook(excel_path_obj)
             
-            # GAPS_REPORT sheet
-            gap_rows_data = [g for g in gaps if g.get('issue_type') == STATUS_GAP] # Use constant
+            # GAPS_REPORT sheet - include coverage gaps and unverified PDFs (business issues)
+            # Use the same separated data as CSV files
             gap_fields_excel = ['subcontractor_name', 'policy_type', 'effective_date', 'expiration_date', 'details', 'file_path'] # More relevant fields for gaps
             
             if 'GAPS_REPORT' in workbook.sheetnames: # type: ignore
@@ -515,8 +529,8 @@ def write_gaps_report(output_dir_str: str, gaps: List[Dict[str, Any]], excel_pat
             _apply_basic_formatting(ws_gaps_report, header_row_idx=1)
             logger.info(f"GAPS_REPORT worksheet created with {len(gap_rows_data)} gap rows.")
 
-            # ERRORS_REPORT sheet (all non-Gap issues)
-            error_rows_data = [g for g in gaps if g.get('issue_type') != STATUS_GAP]
+            # ERRORS_REPORT sheet - technical failures and processing errors only
+            # Use the same separated data as CSV files
             if 'ERRORS_REPORT' in workbook.sheetnames: # type: ignore
                 del workbook['ERRORS_REPORT'] # type: ignore
             
