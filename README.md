@@ -23,8 +23,7 @@ This script automates the process of auditing Certificates of Insurance (COIs) f
     ```bash
     pip install .[dev]
     ```
-    (This assumes `invoke`, `black`, and `pyright` are listed in `pyproject.toml` under `project.optional-dependencies.dev`).
-    Alternatively, if you have a `requirements.txt` for core dependencies and `requirements-dev.txt` for development, use those. For now, we'll assume `pyproject.toml` is the source of truth.
+    All dependencies are managed through `pyproject.toml` for consistent and reliable package management.
 
 2.  **Configure environment variables:**
     - Create a `.env` file in the project root by copying `.env.example`:
