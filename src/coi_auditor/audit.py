@@ -1,18 +1,15 @@
 """Core logic for processing subcontractors, aggregating dates, and detecting gaps."""
 
 from coi_auditor.pdf_parser import find_coi_pdfs, extract_dates_from_pdf # Ensure extract_dates_from_pdf is correctly imported
+from coi_auditor.pdf_classifier import classify_pdf_status
 import logging
 import os
 from datetime import date
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, List
 
-# Gap status constants
-STATUS_OK = "OK"
-STATUS_GAP = "Gap"
-STATUS_MISSING_PDF = "Missing PDF"
-STATUS_MISSING_DATES = "Dates Not Found"
-STATUS_PDF_ERROR = "PDF Error"
+# Import status constants
+from .constants import STATUS_OK, STATUS_GAP, STATUS_MISSING_PDF, STATUS_MISSING_DATES, STATUS_PDF_ERROR
 
 logger = logging.getLogger(__name__) # Will inherit Rich handler from main.py
 
@@ -157,16 +154,60 @@ def process_subcontractor(subcontractor: Dict[str, Any], config: Dict[str, Any],
     # Extract fuzzy matching configuration from config
     fuzzy_config = config.get('fuzzy_matching', {})
 
-    # 1. Find associated PDFs
+    # 1. Use comprehensive PDF classification system
+    pdf_status = classify_pdf_status(subcontractor, pdf_dir, config)
+    
+    if pdf_status['state'] == 'ADMINISTRATIVE':
+        # Skip administrative entries (TOTALS, headers, etc.)
+        logger.info(f"Skipping administrative entry: [cyan]{sub_name}[/cyan]")
+        result['notes'] = 'Administrative Entry'
+        return result, gap_report_entries
+    
+    elif pdf_status['state'] == 'TECHNICAL_FAILURE':
+        # Add to errors collection with detailed diagnostics
+        logger.error(f"Technical failure for [cyan]{sub_name}[/cyan]: {pdf_status['evidence']}")
+        result['notes'] = 'PDF Technical Failure'
+        result['gl_gap_status'] = 'PDF Technical Failure'
+        result['wc_gap_status'] = 'PDF Technical Failure'
+        gap_report_entries.append({
+            "Subcontractor Name": sub_name,
+            "Subcontractor ID": sub_id,
+            "Issue Type": "PDF Technical Failure",
+            "Details": f"Technical issue: {pdf_status['evidence']}",
+            "Policy Type": "N/A",
+            "Effective Date": "N/A",
+            "Expiration Date": "N/A",
+            "File Path": "N/A",
+            "Page Number": "N/A"
+        })
+        return result, gap_report_entries
+    
+    elif pdf_status['state'] == 'UNVERIFIED':
+        # Add to gaps collection as business issue
+        logger.warning(f"Certificate not provided for [cyan]{sub_name}[/cyan]: {pdf_status['evidence']}")
+        result['notes'] = 'Certificate Not Provided'
+        result['gl_gap_status'] = 'Certificate Not Provided'
+        result['wc_gap_status'] = 'Certificate Not Provided'
+        gap_report_entries.append({
+            "Subcontractor Name": sub_name,
+            "Subcontractor ID": sub_id,
+            "Issue Type": "Certificate Not Provided",
+            "Details": f"Business issue: {pdf_status['evidence']}",
+            "Policy Type": "N/A",
+            "Effective Date": "N/A",
+            "Expiration Date": "N/A",
+            "File Path": "N/A",
+            "Page Number": "N/A"
+        })
+        return result, gap_report_entries
+    
+    # If we reach here, pdf_status['state'] == 'VERIFIED'
+    # Continue with normal processing using existing logic
     coi_pdfs = find_coi_pdfs(pdf_dir, sub_name, direct_pdf_path=direct_pdf_path, fuzzy_config=fuzzy_config)
     
     if not coi_pdfs:
-        log_message = f"No COI PDFs found for [cyan]{sub_name}[/cyan]."
-        if direct_pdf_path:
-            log_message += f" Direct path provided was [yellow]{direct_pdf_path}[/yellow]."
-        else:
-            log_message += f" Searched in [yellow]{pdf_dir}[/yellow]."
-        logger.warning(f"[magenta]{log_message}[/magenta] Flagging as '[bold red]{STATUS_MISSING_PDF}[/bold red]'.")
+        # This shouldn't happen if classification is VERIFIED, but handle gracefully
+        logger.warning(f"Classification was VERIFIED but no PDFs found for [cyan]{sub_name}[/cyan]. Falling back to missing PDF logic.")
         result['notes'] = STATUS_MISSING_PDF
         result['gl_gap_status'] = STATUS_MISSING_PDF
         result['wc_gap_status'] = STATUS_MISSING_PDF
@@ -178,7 +219,7 @@ def process_subcontractor(subcontractor: Dict[str, Any], config: Dict[str, Any],
             "Policy Type": "N/A",
             "Effective Date": "N/A",
             "Expiration Date": "N/A",
-            "File Path": "N/A", # No specific PDF path
+            "File Path": "N/A",
             "Page Number": "N/A"
         })
         return result, gap_report_entries
