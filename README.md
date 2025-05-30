@@ -193,4 +193,49 @@ This project uses `invoke` for task management, defined in `tasks.py`. After ins
     ```bash
     dump-coi-log
     ```
+## Development Container
+
+For a consistent development environment, this project includes a VS Code Dev Container configuration. The dev container provides:
+
+- **Pre-configured Python 3.11 environment** with all dependencies
+- **System dependencies** (Poppler, Tesseract OCR) pre-installed
+- **VS Code extensions** for Python development, data analysis, and code quality
+- **Optimized settings** for the COI Auditor project
+
+### Quick Start with Dev Container
+
+1. **Prerequisites:**
+   - [VS Code](https://code.visualstudio.com/) with [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
+   - [Docker Desktop](https://www.docker.com/products/docker-desktop/) running
+
+2. **Open in Container:**
+   - Open the project in VS Code
+   - When prompted, click "Reopen in Container"
+   - Or use Command Palette: `Ctrl+Shift+P` → "Dev Containers: Reopen in Container"
+
+3. **First Time Setup:**
+   - The container will automatically build and install all dependencies
+   - Create your `.env` file: `cp .env.example .env`
+   - Configure your specific paths and settings in `.env`
+
+4. **Start Developing:**
+   ```bash
+   # Run the application
+   coi-auditor
+   
+   # Run tests
+   python tasks.py test
+   
+   # Format code
+   python tasks.py format
+   ```
+
+### Benefits of Using Dev Container
+
+- **No Local Setup Required:** All system dependencies (Poppler, Tesseract) are pre-installed
+- **Consistent Environment:** Same Python version and dependencies across all developers
+- **Integrated Tools:** Jupyter Lab, CSV viewers, PDF tools, and debugging capabilities
+- **Optimized Configuration:** Pre-configured VS Code settings for Python development
+
+For detailed dev container documentation, see [`.devcontainer/README.md`](.devcontainer/README.md).
 For a list of all available tasks, you can often run `python tasks.py --list`.
