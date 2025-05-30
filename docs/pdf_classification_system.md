@@ -121,20 +121,6 @@ Variations:
 - "Smith and Jones LLC"
 ```
 
-## Integration Points
-
-### Backward Compatibility
-The system provides legacy status mapping:
-- `VERIFIED` → `STATUS_OK`
-- `UNVERIFIED` → `STATUS_MISSING_PDF`
-- `TECHNICAL_FAILURE` → `STATUS_PDF_ERROR`
-- `ADMINISTRATIVE` → `"ADMINISTRATIVE"` (new)
-
-### Existing Code Integration
-- Uses existing `find_coi_pdfs()` function
-- Leverages existing `extract_dates_from_pdf()` function
-- Compatible with current subcontractor data structure
-- Works with existing fuzzy matching configuration
 
 ## API Reference
 
